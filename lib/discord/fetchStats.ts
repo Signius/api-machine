@@ -40,23 +40,32 @@ export async function fetchDiscordStats({
 
           for (const channel of channels) {
             let lastId: string | null = null
-            outer: while (true) {
-              const msgs: any = await (channel as TextBasedChannel).messages.fetch({ limit: 100, before: lastId || undefined })
-              if (msgs.size === 0) break
+            try {
+              outer: while (true) {
+                const msgs: any = await (channel as TextBasedChannel).messages.fetch({ limit: 100, before: lastId || undefined })
+                if (msgs.size === 0) break
 
-              for (const msg of msgs.values()) {
-                const ts = msg.createdAt
-                if (ts < startDate) break outer
-                if (ts < endDate) {
-                  const key = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, '0')}`
-                  if (!buckets[key]) buckets[key] = { totalMessages: 0, uniquePosters: new Set() }
-                  buckets[key].totalMessages++
-                  if (!msg.author.bot) buckets[key].uniquePosters.add(msg.author.id)
+                for (const msg of msgs.values()) {
+                  const ts = msg.createdAt
+                  if (ts < startDate) break outer
+                  if (ts < endDate) {
+                    const key = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, '0')}`
+                    if (!buckets[key]) buckets[key] = { totalMessages: 0, uniquePosters: new Set() }
+                    buckets[key].totalMessages++
+                    if (!msg.author.bot) buckets[key].uniquePosters.add(msg.author.id)
+                  }
                 }
-              }
 
-              lastId = msgs.last()?.id || null
-              await new Promise(r => setTimeout(r, 500))
+                lastId = msgs.last()?.id || null
+                await new Promise(r => setTimeout(r, 500))
+              }
+            } catch (err: any) {
+              if (err?.code === 50001 || err?.rawError?.code === 50001 || err?.message?.includes('Missing Access')) {
+                console.warn(`Skipping channel due to missing access: ${channel.id || channel}`)
+                continue
+              } else {
+                throw err
+              }
             }
           }
 
@@ -80,21 +89,30 @@ export async function fetchDiscordStats({
 
           for (const channel of channels) {
             let lastId: string | null = null
-            while (true) {
-              const msgs: any = await (channel as TextBasedChannel).messages.fetch({ limit: 100, before: lastId || undefined })
-              if (msgs.size === 0) break
+            try {
+              while (true) {
+                const msgs: any = await (channel as TextBasedChannel).messages.fetch({ limit: 100, before: lastId || undefined })
+                if (msgs.size === 0) break
 
-              for (const msg of msgs.values()) {
-                const ts = msg.createdAt
-                if (ts >= monthStart && ts < monthEnd) {
-                  totalMessages++
-                  if (!msg.author.bot) uniquePostersSet.add(msg.author.id)
+                for (const msg of msgs.values()) {
+                  const ts = msg.createdAt
+                  if (ts >= monthStart && ts < monthEnd) {
+                    totalMessages++
+                    if (!msg.author.bot) uniquePostersSet.add(msg.author.id)
+                  }
+                  if (ts < monthStart) break
                 }
-                if (ts < monthStart) break
-              }
 
-              lastId = msgs.last()?.id || null
-              await new Promise(r => setTimeout(r, 500))
+                lastId = msgs.last()?.id || null
+                await new Promise(r => setTimeout(r, 500))
+              }
+            } catch (err: any) {
+              if (err?.code === 50001 || err?.rawError?.code === 50001 || err?.message?.includes('Missing Access')) {
+                console.warn(`Skipping channel due to missing access: ${channel.id || channel}`)
+                continue
+              } else {
+                throw err
+              }
             }
           }
 
