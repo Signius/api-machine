@@ -5,11 +5,20 @@
     "scripts": {
         "dev": "next dev",
         "build": "next build",
-        "start": "next start"
+        "start": "next start",
+        "build:functions": "tsc --project netlify/functions/tsconfig.json"
     },
     "dependencies": {
-        "next": "13.4.12",
+        "@netlify/functions": "^4.1.8",
+        "@types/node": "^24.0.10",
+        "discord.js": "^14.21.0",
+        "dotenv": "^16.4.5",
+        "next": "^15.3.4",
         "react": "18.2.0",
         "react-dom": "18.2.0"
+    },
+    "devDependencies": {
+        "@types/dotenv": "^6.1.1",
+        "typescript": "^5.4.2"
     }
 }
