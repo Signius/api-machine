@@ -1,0 +1,123 @@
+# GitHub Actions Workflow Template
+# Copy this file to .github/workflows/your-workflow-name.yml
+
+name: Monthly Stats Collection
+
+on:
+  # Run on the first day of each month at 00:00 UTC
+  schedule:
+    - cron: "0 0 1 * *"
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "Run backfill for historical data"
+        required: false
+        default: "false"
+        type: boolean
+      year:
+        description: "Year to backfill from"
+        required: false
+        default: "2025"
+        type: string
+
+jobs:
+  discord-stats:
+    name: Discord Statistics
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Discord stats collection
+        run: node scripts/github-actions/discord-stats.js
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          GUILD_ID: ${{ secrets.GUILD_ID }}
+          OUTPUT_FILE: ${{ github.workspace }}/discord-stats/stats.json
+          BACKFILL: ${{ github.event.inputs.backfill || 'false' }}
+          BACKFILL_YEAR: ${{ github.event.inputs.year || '2025' }}
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add discord-stats/
+          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update Discord stats - $(date +%Y-%m-%d)"
+          git push
+
+  github-stats:
+    name: GitHub Repository Statistics
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run GitHub stats collection
+        run: node scripts/github-actions/github-repo-stats.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+          OUTPUT_FILE: ${{ github.workspace }}/github-stats/repo-stats.json
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add github-stats/
+          git diff --quiet && git diff --staged --quiet || git commit -m "📈 Update GitHub stats - $(date +%Y-%m-%d)"
+          git push
+
+# Alternative: Simple Discord-only workflow
+# name: Discord Stats Only
+# on:
+#   schedule:
+#     - cron: '0 0 1 * *'
+#   workflow_dispatch:
+#
+# jobs:
+#   discord-stats:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: '18'
+#       - run: npm ci
+#       - run: node scripts/github-actions/discord-stats.js
+#         env:
+#           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+#           GUILD_ID: ${{ secrets.GUILD_ID }}
+#       - run: |
+#           git config --local user.email "action@github.com"
+#           git config --local user.name "GitHub Action"
+#           git add discord-stats/
+#           git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update Discord stats"
+#           git push
+
+# Required Secrets:
+# - DISCORD_TOKEN: Your Discord bot token
+# - GITHUB_TOKEN: Automatically provided by GitHub Actions
+# - GUILD_ID: Your Discord server ID
