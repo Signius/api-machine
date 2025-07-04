@@ -8,6 +8,9 @@ export default function DiscordApiTest() {
     const [response, setResponse] = useState<any>(null)
     const [logs, setLogs] = useState<string[]>([])
     const [error, setError] = useState<string | null>(null)
+    const [engagementStart, setEngagementStart] = useState('2025-03-26T04:15:18.338Z')
+    const [engagementEnd, setEngagementEnd] = useState('2025-07-04T04:15:18.338Z')
+    const [engagementInterval, setEngagementInterval] = useState('3')
 
     const testApi = async (endpoint: string, params?: any) => {
         setLoading(true)
@@ -56,6 +59,15 @@ export default function DiscordApiTest() {
                 guildId: process.env.NEXT_PUBLIC_DISCORD_GUILD_ID || '123456789',
                 backfill: 'true',
                 year: '2025'
+            })
+        },
+        {
+            name: '📈 Get Engagement Analytics',
+            description: 'Fetch Discord engagement analytics for text channels',
+            action: () => testApi('engagement', {
+                start: engagementStart,
+                end: engagementEnd,
+                interval: engagementInterval
             })
         },
         {
@@ -123,6 +135,70 @@ export default function DiscordApiTest() {
                             </button>
                         </div>
                     ))}
+                </div>
+
+                {/* Engagement Analytics Date Range Controls */}
+                <div className={styles.testCard} style={{ marginBottom: '2rem' }}>
+                    <h3>📅 Engagement Analytics Date Range</h3>
+                    <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                        <div>
+                            <label htmlFor="start-date" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                                Start Date:
+                            </label>
+                            <input
+                                id="start-date"
+                                type="datetime-local"
+                                value={engagementStart.replace('Z', '')}
+                                onChange={(e) => setEngagementStart(e.target.value + 'Z')}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.5rem',
+                                    border: '1px solid #ccc',
+                                    borderRadius: '4px',
+                                    fontSize: '14px'
+                                }}
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="end-date" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                                End Date:
+                            </label>
+                            <input
+                                id="end-date"
+                                type="datetime-local"
+                                value={engagementEnd.replace('Z', '')}
+                                onChange={(e) => setEngagementEnd(e.target.value + 'Z')}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.5rem',
+                                    border: '1px solid #ccc',
+                                    borderRadius: '4px',
+                                    fontSize: '14px'
+                                }}
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="interval" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                                Interval:
+                            </label>
+                            <select
+                                id="interval"
+                                value={engagementInterval}
+                                onChange={(e) => setEngagementInterval(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.5rem',
+                                    border: '1px solid #ccc',
+                                    borderRadius: '4px',
+                                    fontSize: '14px'
+                                }}
+                            >
+                                <option value="1">Daily</option>
+                                <option value="2">Weekly</option>
+                                <option value="3">Monthly</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
 
                 {error && (
