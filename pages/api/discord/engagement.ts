@@ -3,13 +3,12 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     const DISCORD_AUTH = process.env.DISCORD_ANALYTICS_TOKEN;
-    const DEFAULT_GUILD_ID = process.env.GUILD_ID;
 
     // Get query parameters with defaults
     const { start: startParam, end: endParam, interval: intervalParam, guild_id: guildIdParam } = req.query;
 
     // Use provided guild_id or fallback to environment variable
-    const guildId = guildIdParam as string || DEFAULT_GUILD_ID;
+    const guildId = guildIdParam as string;
 
     if (!guildId) {
         return res.status(400).json({ error: 'Guild ID is required. Please provide guild_id parameter or set GUILD_ID environment variable.' });
