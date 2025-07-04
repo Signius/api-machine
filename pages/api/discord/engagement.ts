@@ -2,7 +2,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-    const DISCORD_AUTH = process.env.DISCORD_ANALYTICS_TOKEN;
+    // Get auth token from Authorization header, fallback to env variable
+    const authHeader = req.headers.authorization;
+    const DISCORD_AUTH = authHeader;
 
     // Get query parameters with defaults
     const { start: startParam, end: endParam, interval: intervalParam, guild_id: guildIdParam } = req.query;
