@@ -11,8 +11,10 @@ export default function DiscordApiTest() {
     const [engagementStart, setEngagementStart] = useState('2025-03-26T04:15:18.338Z')
     const [engagementEnd, setEngagementEnd] = useState('2025-07-04T04:15:18.338Z')
     const [engagementInterval, setEngagementInterval] = useState('3')
+    // Add state for auth token
+    const [authToken, setAuthToken] = useState('')
 
-    const testApi = async (endpoint: string, params?: any) => {
+    const testApi = async (endpoint: string, params?: any, options?: { authToken?: string }) => {
         setLoading(true)
         setError(null)
         setResponse(null)
@@ -25,7 +27,12 @@ export default function DiscordApiTest() {
                 url += `?${searchParams.toString()}`
             }
 
-            const res = await fetch(url)
+            // Add headers if authToken is provided
+            const fetchOptions: RequestInit = options?.authToken
+                ? { headers: { Authorization: options.authToken } }
+                : {}
+
+            const res = await fetch(url, fetchOptions)
             const data = await res.json()
 
             if (!res.ok) {
@@ -67,8 +74,9 @@ export default function DiscordApiTest() {
             action: () => testApi('engagement', {
                 start: engagementStart,
                 end: engagementEnd,
-                interval: engagementInterval
-            })
+                interval: engagementInterval,
+                guild_id: process.env.NEXT_PUBLIC_DISCORD_GUILD_ID
+            }, { authToken })
         },
         {
             name: '🔗 Test Webhook',
@@ -197,6 +205,26 @@ export default function DiscordApiTest() {
                                 <option value="2">Weekly</option>
                                 <option value="3">Monthly</option>
                             </select>
+                        </div>
+                        {/* Auth Token Input */}
+                        <div>
+                            <label htmlFor="auth-token" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                                Auth Token:
+                            </label>
+                            <input
+                                id="auth-token"
+                                type="text"
+                                value={authToken}
+                                onChange={(e) => setAuthToken(e.target.value)}
+                                placeholder="Bot/User token"
+                                style={{
+                                    width: '100%',
+                                    padding: '0.5rem',
+                                    border: '1px solid #ccc',
+                                    borderRadius: '4px',
+                                    fontSize: '14px'
+                                }}
+                            />
                         </div>
                     </div>
                 </div>
