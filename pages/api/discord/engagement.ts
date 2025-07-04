@@ -65,8 +65,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // Ignore member count errors, just don't include it
         }
 
+        // Add member count to each item if data is an array
+        let responseData;
+        if (Array.isArray(data)) {
+            responseData = data.map((item: any) => ({
+                ...item,
+                approximate_member_count: memberCount,
+            }));
+        } else {
+            responseData = { ...data, approximate_member_count: memberCount };
+        }
+
         // Return engagement data + member count
-        return res.status(200).json({ ...data, approximate_member_count: memberCount });
+        return res.status(200).json(responseData);
     } catch (error: any) {
         return res.status(500).json({ error: error.message });
     }
