@@ -28,6 +28,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const url = `https://discord.com/api/v9/guilds/${guildId}/analytics/engagement/base?start=${start}&end=${end}&interval=${interval}`;
 
     try {
+        // Fetch engagement data
         const response = await fetch(url, {
             headers: {
                 Authorization: DISCORD_AUTH!,
@@ -41,7 +42,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         const data = await response.json();
-        return res.status(200).json(data);
+
+        // Fetch member count from /users/@me/guilds?with_counts=true
+        let memberCount: number | null = null;
+        try {
+            const guildsResponse = await fetch('https://discord.com/api/v9/users/@me/guilds?with_counts=true', {
+                headers: {
+                    Authorization: DISCORD_AUTH!,
+                    'Accept': '*/*',
+                },
+            });
+            if (guildsResponse.ok) {
+                const guilds = await guildsResponse.json();
+                if (Array.isArray(guilds)) {
+                    const matchedGuild = guilds.find((g: any) => g.id === guildId);
+                    if (matchedGuild && typeof matchedGuild.approximate_member_count === 'number') {
+                        memberCount = matchedGuild.approximate_member_count;
+                    }
+                }
+            }
+        } catch (e) {
+            // Ignore member count errors, just don't include it
+        }
+
+        // Return engagement data + member count
+        return res.status(200).json({ ...data, approximate_member_count: memberCount });
     } catch (error: any) {
         return res.status(500).json({ error: error.message });
     }
