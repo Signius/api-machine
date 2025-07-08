@@ -1,0 +1,119 @@
+name: Discord Stats Processing
+
+on:
+  workflow_dispatch:
+    inputs:
+      guild_id:
+        description: "Discord Guild ID"
+        required: true
+        type: string
+      backfill:
+        description: "Enable backfill mode"
+        required: false
+        default: "false"
+        type: boolean
+      year:
+        description: "Year for backfill (default: 2025)"
+        required: false
+        default: "2025"
+        type: string
+
+jobs:
+  process-discord-stats:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger Discord Stats Processing
+        run: |
+          echo "🚀 Triggering Discord stats processing..."
+
+          # Build the URL for the background function
+          NETLIFY_URL="https://your-site.netlify.app"
+          GUILD_ID="${{ github.event.inputs.guild_id }}"
+          BACKFILL="${{ github.event.inputs.backfill }}"
+          YEAR="${{ github.event.inputs.year }}"
+
+          # Trigger the background function
+          curl -X POST "${NETLIFY_URL}/.netlify/functions/discord-stats-background?guildId=${GUILD_ID}&backfill=${BACKFILL}&year=${YEAR}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
+
+          echo "✅ Background function triggered"
+          echo "📊 Polling for completion..."
+
+      - name: Poll for Completion
+        run: |
+          NETLIFY_URL="https://your-site.netlify.app"
+          GUILD_ID="${{ github.event.inputs.guild_id }}"
+          MAX_ATTEMPTS=60  # 10 minutes with 10-second intervals
+          ATTEMPT=0
+
+          # Record the start time for the 'since' parameter
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          echo "⏰ Started polling at: $START_TIME"
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "🔄 Attempt $ATTEMPT/$MAX_ATTEMPTS - Checking status..."
+            
+            # Query the status API
+            RESPONSE=$(curl -s "${NETLIFY_URL}/api/discord/status?guildId=${GUILD_ID}&since=${START_TIME}")
+            
+            # Parse the status using jq (if available) or basic parsing
+            if command -v jq &> /dev/null; then
+              STATUS=$(echo "$RESPONSE" | jq -r '.status // "unknown"')
+              MESSAGE=$(echo "$RESPONSE" | jq -r '.message // "No message"')
+              HAS_DATA=$(echo "$RESPONSE" | jq -r '.hasData // false')
+            else
+              # Basic parsing without jq
+              STATUS=$(echo "$RESPONSE" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+              MESSAGE=$(echo "$RESPONSE" | grep -o '"message":"[^"]*"' | cut -d'"' -f4 || echo "No message")
+              HAS_DATA=$(echo "$RESPONSE" | grep -o '"hasData":true' > /dev/null && echo "true" || echo "false")
+            fi
+            
+            echo "📊 Status: $STATUS - $MESSAGE"
+            
+            if [ "$STATUS" = "completed" ] && [ "$HAS_DATA" = "true" ]; then
+              echo "✅ Processing completed successfully!"
+              
+              # Output the stats for use in subsequent steps
+              if command -v jq &> /dev/null; then
+                echo "STATS_DATA<<EOF" >> $GITHUB_OUTPUT
+                echo "$RESPONSE" | jq -c '.stats' >> $GITHUB_OUTPUT
+                echo "EOF" >> $GITHUB_OUTPUT
+              fi
+              
+              exit 0
+            elif [ "$STATUS" = "stale" ]; then
+              echo "⚠️  Stats are stale, but processing may have completed"
+              exit 0
+            fi
+            
+            echo "⏳ Waiting 10 seconds before next check..."
+            sleep 10
+          done
+
+          echo "❌ Timeout: Processing did not complete within the expected time"
+          exit 1
+
+      - name: Use Results
+        if: success()
+        run: |
+          echo "🎉 Discord stats processing completed!"
+          echo "📈 Stats data is available in the database"
+
+          # You can add additional steps here to use the processed data
+          # For example, you could:
+          # - Send notifications
+          # - Update other systems
+          # - Generate reports
+          # - etc.
+
+      - name: Handle Failure
+        if: failure()
+        run: |
+          echo "❌ Discord stats processing failed or timed out"
+          echo "Please check the logs and try again"

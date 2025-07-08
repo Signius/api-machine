@@ -108,6 +108,24 @@ export default function DiscordApiTest() {
                     setLoading(false)
                 }
             }
+        },
+        {
+            name: '🤖 Test Discord.js Client',
+            description: 'Test Discord.js client with full channel processing',
+            action: () => testApi('client-test', {
+                guild_id: process.env.NEXT_PUBLIC_DISCORD_GUILD_ID,
+                backfill: 'false',
+                backfill_year: '2025'
+            })
+        },
+        {
+            name: '📚 Test Discord.js Client (Backfill)',
+            description: 'Test Discord.js client with backfill for entire year',
+            action: () => testApi('client-test', {
+                guild_id: process.env.NEXT_PUBLIC_DISCORD_GUILD_ID,
+                backfill: 'true',
+                backfill_year: '2025'
+            })
         }
     ]
 
