@@ -27,12 +27,15 @@ export default async function handler(
         })
     }
 
+    // Ensure guildId is a string (Next.js query params can be string | string[] | number)
+    const guildIdString = Array.isArray(guildId) ? guildId[0] : String(guildId)
+
     try {
         // Build query to get the stats for the guild (there's only one record per guild_id)
         let query = supabase
             .from('discord_stats')
             .select('*')
-            .eq('guild_id', guildId)
+            .eq('guild_id', guildIdString)
 
         // If 'since' parameter is provided, only return results updated after that timestamp
         if (since) {
