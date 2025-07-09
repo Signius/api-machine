@@ -201,7 +201,7 @@ async function getProposalDetails(projectId: string) {
       budget,
       milestones_qty,
       funds_distributed,
-      challenges(*),
+      challenges,
       project_id
     `)
         .eq('project_id', projectId)
@@ -217,7 +217,7 @@ async function getProposalDetails(projectId: string) {
         title: data.title,
         budget: data.budget,
         milestones_qty: data.milestones_qty,
-        has_challenges: !!data.challenges && data.challenges.length > 0
+        has_challenges: !!data.challenges && !!data.challenges.title
     })
 
     return data
@@ -301,12 +301,12 @@ export default async (req: Request, context: Context) => {
 
             // Determine fund number from challenges
             let fundNumber = null
-            if (projectDetails.challenges && Array.isArray(projectDetails.challenges) && projectDetails.challenges.length > 0) {
-                fundNumber = extractFundNumberFromChallenges(projectDetails.challenges[0])
+            if (projectDetails.challenges && projectDetails.challenges.title) {
+                fundNumber = extractFundNumberFromChallenges(projectDetails.challenges)
                 if (fundNumber) {
-                    console.log(`[Fund] Extracted fund number ${fundNumber} from challenges: ${projectDetails.challenges[0].title}`)
+                    console.log(`[Fund] Extracted fund number ${fundNumber} from challenges: ${projectDetails.challenges.title}`)
                 } else {
-                    console.log(`[Fund] Could not extract fund number from challenges: ${projectDetails.challenges[0].title}`)
+                    console.log(`[Fund] Could not extract fund number from challenges: ${projectDetails.challenges.title}`)
                 }
             } else {
                 console.log(`[Fund] No challenges data available for project ${projectId}`)
@@ -314,7 +314,7 @@ export default async (req: Request, context: Context) => {
 
             // If not found in challenges, try to get fund number from category
             if (!fundNumber) {
-                const category = projectDetails.challenges?.[0]?.title || ''
+                const category = projectDetails.challenges?.title || ''
                 const catMatch = category.match(/^F(\d+)/i)
                 if (catMatch) {
                     fundNumber = catMatch[1]
@@ -339,12 +339,12 @@ export default async (req: Request, context: Context) => {
 
             // Extract category from challenges data
             let categorySlug = null
-            if (projectDetails.challenges && Array.isArray(projectDetails.challenges) && projectDetails.challenges.length > 0) {
-                categorySlug = extractCategoryFromChallenges(projectDetails.challenges[0])
+            if (projectDetails.challenges && projectDetails.challenges.title) {
+                categorySlug = extractCategoryFromChallenges(projectDetails.challenges)
                 if (categorySlug) {
-                    console.log(`[Category] Extracted category slug "${categorySlug}" from challenges: ${projectDetails.challenges[0].title}`)
+                    console.log(`[Category] Extracted category slug "${categorySlug}" from challenges: ${projectDetails.challenges.title}`)
                 } else {
-                    console.log(`[Category] Could not extract category slug from challenges: ${projectDetails.challenges[0].title}`)
+                    console.log(`[Category] Could not extract category slug from challenges: ${projectDetails.challenges.title}`)
                 }
             } else {
                 console.log(`[Category] No challenges data available for category extraction`)
@@ -402,7 +402,7 @@ export default async (req: Request, context: Context) => {
                 milestones_qty: projectDetails.milestones_qty,
                 funds_distributed: projectDetails.funds_distributed,
                 name: projectDetails.title,
-                category: projectDetails.challenges?.[0]?.title || '',
+                category: projectDetails.challenges?.title || '',
                 url: url,
                 status: 'In Progress',
                 finished: '',
