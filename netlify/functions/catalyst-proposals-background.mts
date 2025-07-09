@@ -36,6 +36,39 @@ if (!LIDO_CSRF_TOKEN) {
 const API_BASE = 'https://www.lidonation.com/api/catalyst-explorer'
 
 /**
+ * Calculates similarity between two strings using Levenshtein distance.
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+    const matrix = []
+
+    for (let i = 0; i <= str2.length; i++) {
+        matrix[i] = [i]
+    }
+
+    for (let j = 0; j <= str1.length; j++) {
+        matrix[0][j] = j
+    }
+
+    for (let i = 1; i <= str2.length; i++) {
+        for (let j = 1; j <= str1.length; j++) {
+            if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1]
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j] + 1
+                )
+            }
+        }
+    }
+
+    const distance = matrix[str2.length][str1.length]
+    const maxLength = Math.max(str1.length, str2.length)
+    return maxLength === 0 ? 1 : (maxLength - distance) / maxLength
+}
+
+/**
  * Fetches voting metrics for a single proposal by title & fund number.
  */
 async function getProposalMetrics({ fundNumber, title, csrfToken }: {
@@ -82,7 +115,39 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     const propsJson = await propsRes.json() as { data: any[] }
     console.log(`[Lido API] Found ${propsJson.data.length} proposals matching search`)
 
-    const match = propsJson.data.find((p: any) => p.title === title)
+    // Log all available proposal titles for debugging
+    console.log(`[Lido API] Available proposal titles:`, propsJson.data.map(p => p.title))
+    console.log(`[Lido API] Looking for exact match: "${title}"`)
+
+    // Try exact match first
+    let match = propsJson.data.find((p: any) => p.title === title)
+
+    // If exact match fails, try case-insensitive match
+    if (!match) {
+        console.log(`[Lido API] Exact match failed, trying case-insensitive match`)
+        match = propsJson.data.find((p: any) => p.title.toLowerCase() === title.toLowerCase())
+    }
+
+    // If still no match, try partial match (contains the search term)
+    if (!match) {
+        console.log(`[Lido API] Case-insensitive match failed, trying partial match`)
+        const searchWords = title.toLowerCase().split(' ').filter(word => word.length > 2)
+        match = propsJson.data.find((p: any) => {
+            const pTitle = p.title.toLowerCase()
+            return searchWords.every(word => pTitle.includes(word))
+        })
+    }
+
+    // If still no match, try fuzzy matching with high similarity
+    if (!match) {
+        console.log(`[Lido API] Partial match failed, trying fuzzy match`)
+        match = propsJson.data.find((p: any) => {
+            const similarity = calculateSimilarity(title.toLowerCase(), p.title.toLowerCase())
+            console.log(`[Lido API] Similarity between "${title}" and "${p.title}": ${similarity}`)
+            return similarity > 0.8 // 80% similarity threshold
+        })
+    }
+
     if (!match) {
         console.error(`[Lido API] Proposal titled "${title}" not found in Fund ${fundNumber}. Available proposals:`, propsJson.data.map(p => p.title))
         throw new Error(`Proposal titled "${title}" not found in Fund ${fundNumber}`)
