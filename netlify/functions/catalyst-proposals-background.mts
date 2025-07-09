@@ -35,41 +35,67 @@ if (!LIDO_CSRF_TOKEN) {
 
 const API_BASE = 'https://www.lidonation.com/api/catalyst-explorer'
 
+// Track successful user_id matches for fallback searches
+const successfulUserIds = new Set<string>()
+
 /**
- * Calculates similarity between two strings using Levenshtein distance.
+ * Generates a normalized title for comparison by applying the same slug generation logic.
  */
-function calculateSimilarity(str1: string, str2: string): number {
-    const matrix = []
+function normalizeTitle(title: string): string {
+    if (!title) return ''
 
-    for (let i = 0; i <= str2.length; i++) {
-        matrix[i] = [i]
-    }
-
-    for (let j = 0; j <= str1.length; j++) {
-        matrix[0][j] = j
-    }
-
-    for (let i = 1; i <= str2.length; i++) {
-        for (let j = 1; j <= str1.length; j++) {
-            if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-                matrix[i][j] = matrix[i - 1][j - 1]
-            } else {
-                matrix[i][j] = Math.min(
-                    matrix[i - 1][j - 1] + 1,
-                    matrix[i][j - 1] + 1,
-                    matrix[i - 1][j] + 1
-                )
-            }
-        }
-    }
-
-    const distance = matrix[str2.length][str1.length]
-    const maxLength = Math.max(str1.length, str2.length)
-    return maxLength === 0 ? 1 : (maxLength - distance) / maxLength
+    return title
+        // Replace '&' with 'and'
+        .replace(/&/g, 'and')
+        // Replace '|' with 'or'
+        .replace(/\|/g, 'or')
+        // Replace '[' and ']' with empty string
+        .replace(/[\[\]]/g, '')
+        // Replace multiple spaces, hyphens, or underscores with single space
+        .replace(/[\s\-_]+/g, ' ')
+        // Remove special characters except spaces and alphanumeric
+        .replace(/[^a-zA-Z0-9\s]/g, '')
+        // Replace multiple spaces with single space
+        .replace(/\s+/g, ' ')
+        // Trim whitespace
+        .trim()
+        // Convert to lowercase
+        .toLowerCase()
 }
 
 /**
- * Fetches voting metrics for a single proposal by title & fund number.
+ * Searches for proposals by user_id in a specific fund.
+ */
+async function searchProposalsByUserId(fundId: number, userId: string, csrfToken: string) {
+    console.log(`[Lido API] Searching for proposals by user_id ${userId} in fund ${fundId}`)
+
+    const headers = {
+        'Accept': 'application/json',
+        'X-CSRF-TOKEN': csrfToken,
+    }
+
+    // Search all proposals in the fund (we'll filter by user_id in the results)
+    const propsRes = await fetch(
+        `${API_BASE}/proposals?fund_id=${fundId}&per_page=100&page=1`,
+        { headers }
+    )
+    if (!propsRes.ok) {
+        console.error(`[Lido API] Failed to search proposals by user_id: ${propsRes.status} ${propsRes.statusText}`)
+        throw new Error(`Failed to search proposals by user_id: ${propsRes.status}`)
+    }
+
+    const propsJson = await propsRes.json() as { data: any[] }
+    console.log(`[Lido API] Retrieved ${propsJson.data.length} proposals from fund ${fundId}`)
+
+    // Filter proposals by user_id
+    const userProposals = propsJson.data.filter((p: any) => p.user_id === userId)
+    console.log(`[Lido API] Found ${userProposals.length} proposals for user_id ${userId}`)
+
+    return userProposals
+}
+
+/**
+ * Fetches voting metrics for a single proposal by title & fund number, with fallback to user_id search.
  */
 async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     fundNumber: number | string
@@ -101,7 +127,7 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     const fundId = fund.id
     console.log(`[Lido API] Found fund with ID: ${fundId}`)
 
-    // 2) Search proposals in that fund for the exact title
+    // 2) First attempt: Search proposals in that fund for the exact title
     const searchTerm = encodeURIComponent(title)
     console.log(`[Lido API] Searching for proposal "${title}" in fund ${fundId}`)
     const propsRes = await fetch(
@@ -115,47 +141,52 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     const propsJson = await propsRes.json() as { data: any[] }
     console.log(`[Lido API] Found ${propsJson.data.length} proposals matching search`)
 
-    // Log all available proposal titles for debugging
-    console.log(`[Lido API] Available proposal titles:`, propsJson.data.map(p => p.title))
-    console.log(`[Lido API] Looking for exact match: "${title}"`)
-
-    // Try exact match first
     let match = propsJson.data.find((p: any) => p.title === title)
 
-    // If exact match fails, try case-insensitive match
-    if (!match) {
-        console.log(`[Lido API] Exact match failed, trying case-insensitive match`)
-        match = propsJson.data.find((p: any) => p.title.toLowerCase() === title.toLowerCase())
-    }
+    // 3) If no exact match found, try fallback search by user_id
+    if (!match && successfulUserIds.size > 0) {
+        console.log(`[Lido API] No exact title match found, trying user_id fallback search`)
 
-    // If still no match, try partial match (contains the search term)
-    if (!match) {
-        console.log(`[Lido API] Case-insensitive match failed, trying partial match`)
-        const searchWords = title.toLowerCase().split(' ').filter(word => word.length > 2)
-        match = propsJson.data.find((p: any) => {
-            const pTitle = p.title.toLowerCase()
-            return searchWords.every(word => pTitle.includes(word))
-        })
-    }
+        for (const userId of successfulUserIds) {
+            console.log(`[Lido API] Trying user_id: ${userId}`)
+            const userProposals = await searchProposalsByUserId(fundId, userId, csrfToken)
 
-    // If still no match, try fuzzy matching with high similarity
-    if (!match) {
-        console.log(`[Lido API] Partial match failed, trying fuzzy match`)
-        match = propsJson.data.find((p: any) => {
-            const similarity = calculateSimilarity(title.toLowerCase(), p.title.toLowerCase())
-            console.log(`[Lido API] Similarity between "${title}" and "${p.title}": ${similarity}`)
-            return similarity > 0.8 // 80% similarity threshold
-        })
+            // Compare normalized titles
+            const normalizedTargetTitle = normalizeTitle(title)
+            console.log(`[Lido API] Normalized target title: "${normalizedTargetTitle}"`)
+
+            for (const proposal of userProposals) {
+                const normalizedProposalTitle = normalizeTitle(proposal.title)
+                console.log(`[Lido API] Comparing with normalized proposal title: "${normalizedProposalTitle}"`)
+
+                if (normalizedTargetTitle === normalizedProposalTitle) {
+                    match = proposal
+                    console.log(`[Lido API] Found match via user_id fallback: "${proposal.title}"`)
+                    break
+                }
+            }
+
+            if (match) break
+        }
     }
 
     if (!match) {
         console.error(`[Lido API] Proposal titled "${title}" not found in Fund ${fundNumber}. Available proposals:`, propsJson.data.map(p => p.title))
         throw new Error(`Proposal titled "${title}" not found in Fund ${fundNumber}`)
     }
-    const proposalId = match.id
-    console.log(`[Lido API] Found proposal with ID: ${proposalId}`)
 
-    // 3) Fetch full proposal details by ID
+    const proposalId = match.id
+    const userId = match.user_id
+
+    // Track successful user_id for future fallback searches
+    if (userId) {
+        successfulUserIds.add(userId)
+        console.log(`[Lido API] Added user_id ${userId} to successful matches. Total tracked: ${successfulUserIds.size}`)
+    }
+
+    console.log(`[Lido API] Found proposal with ID: ${proposalId}, user_id: ${userId}`)
+
+    // 4) Fetch full proposal details by ID
     console.log(`[Lido API] Fetching detailed proposal data for ID ${proposalId}`)
     const detailRes = await fetch(`${API_BASE}/proposals/${proposalId}`, { headers })
     if (!detailRes.ok) {
@@ -324,6 +355,10 @@ export default async (req: Request, context: Context) => {
     console.log('🚀 Catalyst proposals background function started')
     console.log('📅 Timestamp:', new Date().toISOString())
 
+    // Reset successful user_ids for this run
+    successfulUserIds.clear()
+    console.log('🔄 Reset successful user_ids tracking for new run')
+
     const url = new URL(req.url)
     const projectIds = url.searchParams.get('projectIds') || ''
 
@@ -428,6 +463,7 @@ export default async (req: Request, context: Context) => {
             let voting = null
             if (fundNumber && projectDetails.title) {
                 console.log(`[Metrics] Fetching metrics for project "${projectDetails.title}" (ID: ${projectId})`)
+                console.log(`[Metrics] Available user_ids for fallback: ${Array.from(successfulUserIds).join(', ') || 'none'}`)
                 try {
                     const metrics = await getProposalMetrics({
                         fundNumber,
@@ -503,6 +539,7 @@ export default async (req: Request, context: Context) => {
 
         console.log(`\n🎉 Successfully processed ${processedProjects.length} out of ${PROJECT_IDS.length} Catalyst projects`)
         console.log('📊 Final processed projects:', processedProjects.map(p => ({ id: p.project_id, title: p.title })))
+        console.log('👥 User IDs tracked for fallback searches:', Array.from(successfulUserIds))
 
         return new Response(
             JSON.stringify({
