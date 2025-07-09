@@ -2,7 +2,7 @@
 import type { Context } from '@netlify/functions'
 import { config as dotenv } from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
-import { fetchDiscordStats } from '../../../lib/discord/fetchStats.js'
+import { fetchDiscordStats } from '../../lib/discord/fetchStats.js'
 
 dotenv()
 
