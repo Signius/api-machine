@@ -424,7 +424,7 @@ export default async (req: Request, context: Context) => {
             const { data, error } = await supabaseUpsert
                 .from('catalyst_proposals')
                 .upsert(supabaseData, {
-                    onConflict: 'id'
+                    onConflict: 'project_id'
                 })
 
             if (error) {
