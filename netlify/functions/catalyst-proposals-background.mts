@@ -201,7 +201,7 @@ async function getProposalDetails(projectId: string) {
       budget,
       milestones_qty,
       funds_distributed,
-      challenges,
+      challenges(*),
       project_id
     `)
         .eq('project_id', projectId)
