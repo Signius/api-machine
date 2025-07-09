@@ -6,15 +6,25 @@ import axios from 'axios'
 
 dotenv()
 
-// Initialize Supabase client
+// Initialize Supabase clients for different databases
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const catalystSupabaseUrl = process.env.CATALYST_SUPABASE_URL
+const catalystSupabaseKey = process.env.CATALYST_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseServiceKey) {
     throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables')
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
+if (!catalystSupabaseUrl || !catalystSupabaseKey) {
+    throw new Error('Missing CATALYST_SUPABASE_URL or CATALYST_SUPABASE_ANON_KEY environment variables')
+}
+
+// Client for fetching proposal details (using CATALYST_SUPABASE_URL)
+const supabaseFetch = createClient(catalystSupabaseUrl, catalystSupabaseKey)
+
+// Client for upserting data (using SUPABASE_URL)
+const supabaseUpsert = createClient(supabaseUrl, supabaseServiceKey)
 
 // Lido CSRF token for lidonation API calls
 const LIDO_CSRF_TOKEN = process.env.LIDO_CSRF_TOKEN
@@ -183,7 +193,7 @@ function generateCatalystUrl(title: string, fundNumber: string, categorySlug: st
 async function getProposalDetails(projectId: string) {
     console.log(`[Supabase] Getting proposal details for project ${projectId}`)
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseFetch
         .from('proposals')
         .select(`
       id,
@@ -221,12 +231,12 @@ async function fetchSnapshotData(projectId: string) {
 
     try {
         const response = await axios.post(
-            `${supabaseUrl}/rest/v1/rpc/getproposalsnapshot`,
+            `${catalystSupabaseUrl}/rest/v1/rpc/getproposalsnapshot`,
             { _project_id: projectId },
             {
                 headers: {
-                    'apikey': supabaseServiceKey,
-                    'Authorization': `Bearer ${supabaseServiceKey}`,
+                    'apikey': catalystSupabaseKey,
+                    'Authorization': `Bearer ${catalystSupabaseKey}`,
                     'Content-Type': 'application/json',
                     'Content-Profile': 'public',
                     'x-client-info': 'supabase-js/2.2.3'
@@ -272,7 +282,8 @@ export default async (req: Request, context: Context) => {
 
     try {
         console.log('🔄 Starting to process Catalyst data for projects:', PROJECT_IDS)
-        console.log('🔧 Environment check - Supabase URL:', supabaseUrl ? '✅ Set' : '❌ Missing')
+        console.log('🔧 Environment check - Supabase URL (upsert):', supabaseUrl ? '✅ Set' : '❌ Missing')
+        console.log('🔧 Environment check - CATALYST_SUPABASE_URL (fetch):', catalystSupabaseUrl ? '✅ Set' : '❌ Missing')
         console.log('🔧 Environment check - LIDO_CSRF_TOKEN:', LIDO_CSRF_TOKEN ? '✅ Set' : '❌ Missing')
 
         const processedProjects = []
@@ -412,7 +423,7 @@ export default async (req: Request, context: Context) => {
             })
 
             // Upsert data to Supabase
-            const { data, error } = await supabase
+            const { data, error } = await supabaseUpsert
                 .from('catalyst_proposals')
                 .upsert(supabaseData, {
                     onConflict: 'project_id'
