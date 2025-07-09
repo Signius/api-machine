@@ -396,37 +396,35 @@ export default async (req: Request, context: Context) => {
 
             // Prepare data for Supabase
             const supabaseData = {
-                project_id: projectId,
+                id: parseInt(projectId),
                 title: projectDetails.title,
                 budget: projectDetails.budget,
                 milestones_qty: projectDetails.milestones_qty,
                 funds_distributed: projectDetails.funds_distributed,
+                project_id: projectDetails.project_id,
+                challenges: projectDetails.challenges,
                 name: projectDetails.title,
                 category: (projectDetails.challenges as any)?.title || '',
                 url: url,
                 status: 'In Progress',
                 finished: '',
-                fund_number: fundNumber,
-                category_slug: categorySlug,
                 voting: voting,
-                milestones_completed: milestonesCompleted,
                 updated_at: new Date().toISOString()
             }
 
             console.log(`[Supabase] Preparing to upsert data for project ${projectId}:`, {
                 title: supabaseData.title,
                 budget: supabaseData.budget,
-                fund_number: supabaseData.fund_number,
-                category_slug: supabaseData.category_slug,
+                project_id: supabaseData.project_id,
                 has_voting_data: !!supabaseData.voting,
-                milestones_completed: supabaseData.milestones_completed
+                has_challenges: !!supabaseData.challenges
             })
 
             // Upsert data to Supabase
             const { data, error } = await supabaseUpsert
                 .from('catalyst_proposals')
                 .upsert(supabaseData, {
-                    onConflict: 'project_id'
+                    onConflict: 'id'
                 })
 
             if (error) {
