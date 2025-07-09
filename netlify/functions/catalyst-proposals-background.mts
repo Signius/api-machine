@@ -396,7 +396,7 @@ export default async (req: Request, context: Context) => {
 
             // Prepare data for Supabase
             const supabaseData = {
-                id: parseInt(projectId),
+                id: projectDetails.id,
                 title: projectDetails.title,
                 budget: projectDetails.budget,
                 milestones_qty: projectDetails.milestones_qty,
