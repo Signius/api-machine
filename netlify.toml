@@ -2,7 +2,7 @@
 functions = "netlify/functions"
 
 [functions]
-[functions.discord-stats-background]
+[functions."discord/stats-background"]
 runtime = "nodejs18.x"
 
 [dev]
