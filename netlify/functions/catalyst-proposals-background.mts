@@ -97,7 +97,14 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
         console.error(`[Lido API] Failed to fetch proposal ${proposalId}: ${detailRes.status} ${detailRes.statusText}`)
         throw new Error(`Failed to fetch proposal ${proposalId}: ${detailRes.status}`)
     }
-    const { data: detail } = await detailRes.json() as { data: any }
+    const detailResponse = await detailRes.json() as { data: any }
+    const { data: detail } = detailResponse
+
+    console.log(`[Lido API] Raw response structure:`, {
+        response_keys: Object.keys(detailResponse),
+        data_keys: detail ? Object.keys(detail) : null,
+        has_data: !!detail
+    })
 
     const {
         yes_votes_count,
@@ -107,13 +114,46 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
         users
     } = detail
 
-    // Extract user_id from the users array
-    const userId = users && users.length > 0 ? users[0].id : null
+    // Extract user_id from the users array - try multiple possible field names
+    let userId = null
+
+    // Try the expected 'users' field first
+    if (users && users.length > 0) {
+        userId = users[0].id
+        console.log(`[Lido API] Found user ID from 'users' field: ${userId}`)
+    }
+
+    // If not found, try alternative field names
+    if (!userId && detail.user_id) {
+        userId = detail.user_id
+        console.log(`[Lido API] Found user ID from 'user_id' field: ${userId}`)
+    }
+
+    if (!userId && detail.user) {
+        userId = detail.user.id || detail.user
+        console.log(`[Lido API] Found user ID from 'user' field: ${userId}`)
+    }
+
+    if (!userId) {
+        console.log(`[Lido API] No user ID found in any expected fields`)
+    }
+
+    // Debug: Check if users exists and log its structure
+    console.log(`[Lido API] Users field debug:`, {
+        has_users_field: 'users' in detail,
+        users_value: detail.users,
+        users_type: typeof detail.users,
+        users_is_array: Array.isArray(detail.users),
+        users_length: detail.users ? detail.users.length : 'N/A'
+    })
 
     console.log(`[Lido API] Full proposal detail structure:`, {
         has_users: !!users,
         users_length: users ? users.length : 0,
-        users_structure: users ? users.slice(0, 2) : null
+        users_structure: users ? users.slice(0, 2) : null,
+        full_detail_keys: Object.keys(detail),
+        detail_id: detail.id,
+        detail_title: detail.title
     })
 
     console.log(`[Lido API] Successfully retrieved voting metrics:`, {
