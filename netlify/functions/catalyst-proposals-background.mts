@@ -637,9 +637,24 @@ export default async (req: Request, context: Context) => {
         console.log(`\n💾 PUSHING TO DATABASE: ${allSupabaseData.length} projects`)
 
         if (allSupabaseData.length > 0) {
+            // Remove duplicates based on project_id to prevent ON CONFLICT errors
+            const uniqueSupabaseData = allSupabaseData.reduce((acc: any[], current: any) => {
+                const existingIndex = acc.findIndex(item => item.project_id === current.project_id)
+                if (existingIndex >= 0) {
+                    // Replace existing entry with the newer one (which has more complete data)
+                    acc[existingIndex] = current
+                    console.log(`🔄 Deduplicated project_id: ${current.project_id}`)
+                } else {
+                    acc.push(current)
+                }
+                return acc
+            }, [])
+
+            console.log(`📊 After deduplication: ${uniqueSupabaseData.length} unique projects`)
+
             const { data, error } = await supabaseUpsert
                 .from('catalyst_proposals')
-                .upsert(allSupabaseData, {
+                .upsert(uniqueSupabaseData, {
                     onConflict: 'project_id'
                 })
 
@@ -657,7 +672,7 @@ export default async (req: Request, context: Context) => {
                 )
             }
 
-            console.log(`✅ Successfully saved ${allSupabaseData.length} projects to database`)
+            console.log(`✅ Successfully saved ${uniqueSupabaseData.length} projects to database`)
         } else {
             console.log(`⚠️ No projects to save to database`)
         }
