@@ -527,6 +527,7 @@ export default async (req: Request, context: Context) => {
                 status: 'In Progress',
                 finished: '',
                 voting: voting,
+                milestones_completed: milestonesCompleted,
                 updated_at: new Date().toISOString()
             }
 
@@ -615,6 +616,7 @@ export default async (req: Request, context: Context) => {
                         status: 'In Progress',
                         finished: '',
                         voting: voting,
+                        milestones_completed: milestonesCompleted,
                         updated_at: new Date().toISOString()
                     }
 
