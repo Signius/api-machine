@@ -410,7 +410,8 @@ export default async (req: Request, context: Context) => {
         console.log('🔧 Environment check - CATALYST_SUPABASE_URL (fetch):', catalystSupabaseUrl ? '✅ Set' : '❌ Missing')
         console.log('🔧 Environment check - LIDO_CSRF_TOKEN:', LIDO_CSRF_TOKEN ? '✅ Set' : '❌ Missing')
 
-        const processedProjects = []
+        // Collect all data in memory before pushing to database
+        const allSupabaseData: any[] = []
         const successfulUserIds = new Set<number>()
         const failedTitles: Array<{ projectId: string, title: string, fundNumber: string | null }> = []
 
@@ -511,7 +512,7 @@ export default async (req: Request, context: Context) => {
                 (m: any) => m.som_signoff_count > 0 && m.poa_signoff_count > 0
             ).length
 
-            // Prepare data for Supabase
+            // Prepare data for Supabase (but don't push yet)
             const supabaseData = {
                 id: projectDetails.id,
                 title: projectDetails.title,
@@ -529,20 +530,9 @@ export default async (req: Request, context: Context) => {
                 updated_at: new Date().toISOString()
             }
 
-            // Upsert data to Supabase
-            const { data, error } = await supabaseUpsert
-                .from('catalyst_proposals')
-                .upsert(supabaseData, {
-                    onConflict: 'project_id'
-                })
-
-            if (error) {
-                console.error(`❌ Failed to save project ${projectId} to Supabase:`, error)
-                continue
-            }
-
-            processedProjects.push(supabaseData)
-            console.log(`✅ Saved project ${projectId}: "${projectDetails.title}"`)
+            // Store in memory instead of pushing to database
+            allSupabaseData.push(supabaseData)
+            console.log(`✅ Prepared project ${projectId}: "${projectDetails.title}"`)
         }
 
         // Second pass: Try matching failed titles using user IDs
@@ -610,8 +600,8 @@ export default async (req: Request, context: Context) => {
                         (m: any) => m.som_signoff_count > 0 && m.poa_signoff_count > 0
                     ).length
 
-                    // Prepare data for Supabase
-                    const supabaseData = {
+                    // Prepare updated data for Supabase (but don't push yet)
+                    const updatedSupabaseData = {
                         id: projectDetails.id,
                         title: projectDetails.title,
                         budget: projectDetails.budget,
@@ -628,24 +618,14 @@ export default async (req: Request, context: Context) => {
                         updated_at: new Date().toISOString()
                     }
 
-                    // Update the existing record in Supabase
-                    const { data, error } = await supabaseUpsert
-                        .from('catalyst_proposals')
-                        .upsert(supabaseData, {
-                            onConflict: 'project_id'
-                        })
-
-                    if (error) {
-                        console.error(`[Retry] ❌ Failed to update project ${failedTitle.projectId} in Supabase:`, error)
-                    } else {
+                    // Update the existing record in memory
+                    const existingIndex = allSupabaseData.findIndex(p => p.project_id === failedTitle.projectId)
+                    if (existingIndex >= 0) {
+                        allSupabaseData[existingIndex] = updatedSupabaseData
                         console.log(`[Retry] ✅ Updated project ${failedTitle.projectId} with voting data`)
-                        // Update the processed projects list
-                        const existingIndex: number = processedProjects.findIndex(p => p.project_id === failedTitle.projectId)
-                        if (existingIndex >= 0) {
-                            processedProjects[existingIndex] = supabaseData
-                        } else {
-                            processedProjects.push(supabaseData)
-                        }
+                    } else {
+                        allSupabaseData.push(updatedSupabaseData)
+                        console.log(`[Retry] ✅ Added project ${failedTitle.projectId} with voting data`)
                     }
                 } else {
                     console.log(`[Retry] ❌ No match found for "${failedTitle.title}"`)
@@ -653,14 +633,43 @@ export default async (req: Request, context: Context) => {
             }
         }
 
+        // FINAL STEP: Push everything to database at once
+        console.log(`\n💾 PUSHING TO DATABASE: ${allSupabaseData.length} projects`)
+
+        if (allSupabaseData.length > 0) {
+            const { data, error } = await supabaseUpsert
+                .from('catalyst_proposals')
+                .upsert(allSupabaseData, {
+                    onConflict: 'project_id'
+                })
+
+            if (error) {
+                console.error(`❌ Failed to batch save projects to Supabase:`, error)
+                return new Response(
+                    JSON.stringify({
+                        error: 'Database save failed',
+                        details: error.message
+                    }),
+                    {
+                        status: 500,
+                        headers: { 'Content-Type': 'application/json' }
+                    }
+                )
+            }
+
+            console.log(`✅ Successfully saved ${allSupabaseData.length} projects to database`)
+        } else {
+            console.log(`⚠️ No projects to save to database`)
+        }
+
         // Calculate final statistics
-        const projectsWithVoting = processedProjects.filter(p => p.voting).length
-        const projectsWithoutVoting = processedProjects.length - projectsWithVoting
-        const secondPassSuccesses = processedProjects.filter(p => p.voting && !PROJECT_IDS.includes(p.project_id)).length
+        const projectsWithVoting = allSupabaseData.filter(p => p.voting).length
+        const projectsWithoutVoting = allSupabaseData.length - projectsWithVoting
+        const secondPassSuccesses = allSupabaseData.filter(p => p.voting && !PROJECT_IDS.includes(p.project_id)).length
 
         console.log(`\n🎉 Processing Complete!`)
         console.log(`📊 Summary:`)
-        console.log(`   • Total projects processed: ${processedProjects.length}/${PROJECT_IDS.length}`)
+        console.log(`   • Total projects processed: ${allSupabaseData.length}/${PROJECT_IDS.length}`)
         console.log(`   • Projects with voting data: ${projectsWithVoting}`)
         console.log(`   • Projects without voting data: ${projectsWithoutVoting}`)
         console.log(`   • Second pass successes: ${secondPassSuccesses}`)
@@ -671,8 +680,8 @@ export default async (req: Request, context: Context) => {
             JSON.stringify({
                 success: true,
                 message: 'Catalyst proposals fetched and saved successfully',
-                processed_count: processedProjects.length,
-                projects: processedProjects,
+                processed_count: allSupabaseData.length,
+                projects: allSupabaseData,
                 successful_user_ids: Array.from(successfulUserIds),
                 failed_titles_count: failedTitles.length
             }),
