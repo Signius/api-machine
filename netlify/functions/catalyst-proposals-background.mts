@@ -35,67 +35,8 @@ if (!LIDO_CSRF_TOKEN) {
 
 const API_BASE = 'https://www.lidonation.com/api/catalyst-explorer'
 
-// Track successful user_id matches for fallback searches
-const successfulUserIds = new Set<string>()
-
 /**
- * Generates a normalized title for comparison by applying the same slug generation logic.
- */
-function normalizeTitle(title: string): string {
-    if (!title) return ''
-
-    return title
-        // Replace '&' with 'and'
-        .replace(/&/g, 'and')
-        // Replace '|' with 'or'
-        .replace(/\|/g, 'or')
-        // Replace '[' and ']' with empty string
-        .replace(/[\[\]]/g, '')
-        // Replace multiple spaces, hyphens, or underscores with single space
-        .replace(/[\s\-_]+/g, ' ')
-        // Remove special characters except spaces and alphanumeric
-        .replace(/[^a-zA-Z0-9\s]/g, '')
-        // Replace multiple spaces with single space
-        .replace(/\s+/g, ' ')
-        // Trim whitespace
-        .trim()
-        // Convert to lowercase
-        .toLowerCase()
-}
-
-/**
- * Searches for proposals by user_id in a specific fund.
- */
-async function searchProposalsByUserId(fundId: number, userId: string, csrfToken: string) {
-    console.log(`[Lido API] Searching for proposals by user_id ${userId} in fund ${fundId}`)
-
-    const headers = {
-        'Accept': 'application/json',
-        'X-CSRF-TOKEN': csrfToken,
-    }
-
-    // Search all proposals in the fund (we'll filter by user_id in the results)
-    const propsRes = await fetch(
-        `${API_BASE}/proposals?fund_id=${fundId}&per_page=100&page=1`,
-        { headers }
-    )
-    if (!propsRes.ok) {
-        console.error(`[Lido API] Failed to search proposals by user_id: ${propsRes.status} ${propsRes.statusText}`)
-        throw new Error(`Failed to search proposals by user_id: ${propsRes.status}`)
-    }
-
-    const propsJson = await propsRes.json() as { data: any[] }
-    console.log(`[Lido API] Retrieved ${propsJson.data.length} proposals from fund ${fundId}`)
-
-    // Filter proposals by user_id
-    const userProposals = propsJson.data.filter((p: any) => p.user_id === userId)
-    console.log(`[Lido API] Found ${userProposals.length} proposals for user_id ${userId}`)
-
-    return userProposals
-}
-
-/**
- * Fetches voting metrics for a single proposal by title & fund number, with fallback to user_id search.
+ * Fetches voting metrics for a single proposal by title & fund number.
  */
 async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     fundNumber: number | string
@@ -127,7 +68,7 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     const fundId = fund.id
     console.log(`[Lido API] Found fund with ID: ${fundId}`)
 
-    // 2) First attempt: Search proposals in that fund for the exact title
+    // 2) Search proposals in that fund for the exact title
     const searchTerm = encodeURIComponent(title)
     console.log(`[Lido API] Searching for proposal "${title}" in fund ${fundId}`)
     const propsRes = await fetch(
@@ -141,52 +82,15 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     const propsJson = await propsRes.json() as { data: any[] }
     console.log(`[Lido API] Found ${propsJson.data.length} proposals matching search`)
 
-    let match = propsJson.data.find((p: any) => p.title === title)
-
-    // 3) If no exact match found, try fallback search by user_id
-    if (!match && successfulUserIds.size > 0) {
-        console.log(`[Lido API] No exact title match found, trying user_id fallback search`)
-
-        for (const userId of successfulUserIds) {
-            console.log(`[Lido API] Trying user_id: ${userId}`)
-            const userProposals = await searchProposalsByUserId(fundId, userId, csrfToken)
-
-            // Compare normalized titles
-            const normalizedTargetTitle = normalizeTitle(title)
-            console.log(`[Lido API] Normalized target title: "${normalizedTargetTitle}"`)
-
-            for (const proposal of userProposals) {
-                const normalizedProposalTitle = normalizeTitle(proposal.title)
-                console.log(`[Lido API] Comparing with normalized proposal title: "${normalizedProposalTitle}"`)
-
-                if (normalizedTargetTitle === normalizedProposalTitle) {
-                    match = proposal
-                    console.log(`[Lido API] Found match via user_id fallback: "${proposal.title}"`)
-                    break
-                }
-            }
-
-            if (match) break
-        }
-    }
-
+    const match = propsJson.data.find((p: any) => p.title === title)
     if (!match) {
         console.error(`[Lido API] Proposal titled "${title}" not found in Fund ${fundNumber}. Available proposals:`, propsJson.data.map(p => p.title))
         throw new Error(`Proposal titled "${title}" not found in Fund ${fundNumber}`)
     }
-
     const proposalId = match.id
-    const userId = match.user_id
+    console.log(`[Lido API] Found proposal with ID: ${proposalId}`)
 
-    // Track successful user_id for future fallback searches
-    if (userId) {
-        successfulUserIds.add(userId)
-        console.log(`[Lido API] Added user_id ${userId} to successful matches. Total tracked: ${successfulUserIds.size}`)
-    }
-
-    console.log(`[Lido API] Found proposal with ID: ${proposalId}, user_id: ${userId}`)
-
-    // 4) Fetch full proposal details by ID
+    // 3) Fetch full proposal details by ID
     console.log(`[Lido API] Fetching detailed proposal data for ID ${proposalId}`)
     const detailRes = await fetch(`${API_BASE}/proposals/${proposalId}`, { headers })
     if (!detailRes.ok) {
@@ -199,17 +103,88 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
         yes_votes_count,
         no_votes_count,
         abstain_votes_count,
-        unique_wallets
+        unique_wallets,
+        users
     } = detail
+
+    // Extract user_id from the users array
+    const userId = users && users.length > 0 ? users[0].id : null
 
     console.log(`[Lido API] Successfully retrieved voting metrics:`, {
         yes_votes: yes_votes_count,
         no_votes: no_votes_count,
         abstain_votes: abstain_votes_count,
-        unique_wallets
+        unique_wallets,
+        user_id: userId
     })
 
-    return { proposalId, yes_votes_count, no_votes_count, abstain_votes_count, unique_wallets }
+    return { proposalId, yes_votes_count, no_votes_count, abstain_votes_count, unique_wallets, user_id: userId }
+}
+
+/**
+ * Fetches all proposals by a specific user ID.
+ */
+async function getProposalsByUserId(userId: number, csrfToken: string) {
+    console.log(`[Lido API] Fetching all proposals for user ID: ${userId}`)
+
+    const headers = {
+        'Accept': 'application/json',
+        'X-CSRF-TOKEN': csrfToken,
+    }
+
+    try {
+        const response = await fetch(
+            `${API_BASE}/proposals?user_id=${userId}&per_page=24&page=1`,
+            { headers }
+        )
+
+        if (!response.ok) {
+            console.error(`[Lido API] Failed to fetch proposals for user ${userId}: ${response.status} ${response.statusText}`)
+            throw new Error(`Failed to fetch proposals for user ${userId}: ${response.status}`)
+        }
+
+        const { data: proposals } = await response.json() as { data: any[] }
+        console.log(`[Lido API] Retrieved ${proposals.length} proposals for user ${userId}`)
+
+        return proposals
+    } catch (error) {
+        console.error(`[Lido API] Error fetching proposals for user ${userId}:`, error)
+        return []
+    }
+}
+
+/**
+ * Attempts to find a proposal by title from a list of user proposals.
+ */
+function findProposalByTitle(proposals: any[], targetTitle: string): any | null {
+    // First try exact match
+    const exactMatch = proposals.find(p => p.title === targetTitle)
+    if (exactMatch) {
+        console.log(`[Lido API] Found exact title match: "${targetTitle}"`)
+        return exactMatch
+    }
+
+    // Try case-insensitive match
+    const caseInsensitiveMatch = proposals.find(p =>
+        p.title.toLowerCase() === targetTitle.toLowerCase()
+    )
+    if (caseInsensitiveMatch) {
+        console.log(`[Lido API] Found case-insensitive title match: "${targetTitle}"`)
+        return caseInsensitiveMatch
+    }
+
+    // Try partial match (if title contains the target)
+    const partialMatch = proposals.find(p =>
+        p.title.toLowerCase().includes(targetTitle.toLowerCase()) ||
+        targetTitle.toLowerCase().includes(p.title.toLowerCase())
+    )
+    if (partialMatch) {
+        console.log(`[Lido API] Found partial title match: "${targetTitle}" -> "${partialMatch.title}"`)
+        return partialMatch
+    }
+
+    console.log(`[Lido API] No title match found for "${targetTitle}" in user proposals`)
+    return null
 }
 
 /**
@@ -355,10 +330,6 @@ export default async (req: Request, context: Context) => {
     console.log('🚀 Catalyst proposals background function started')
     console.log('📅 Timestamp:', new Date().toISOString())
 
-    // Reset successful user_ids for this run
-    successfulUserIds.clear()
-    console.log('🔄 Reset successful user_ids tracking for new run')
-
     const url = new URL(req.url)
     const projectIds = url.searchParams.get('projectIds') || ''
 
@@ -387,7 +358,11 @@ export default async (req: Request, context: Context) => {
         console.log('🔧 Environment check - LIDO_CSRF_TOKEN:', LIDO_CSRF_TOKEN ? '✅ Set' : '❌ Missing')
 
         const processedProjects = []
+        const successfulUserIds = new Set<number>()
+        const failedTitles: Array<{ projectId: string, title: string, fundNumber: string | null }> = []
 
+        // First pass: Try direct title matching
+        console.log('\n🔄 FIRST PASS: Direct title matching')
         for (const projectId of PROJECT_IDS) {
             console.log(`\n📊 Processing project ID: ${projectId}`)
 
@@ -461,28 +436,55 @@ export default async (req: Request, context: Context) => {
 
             // Fetch voting metrics if we have fund number and title
             let voting = null
+            let userId = null
             if (fundNumber && projectDetails.title) {
                 console.log(`[Metrics] Fetching metrics for project "${projectDetails.title}" (ID: ${projectId})`)
-                console.log(`[Metrics] Available user_ids for fallback: ${Array.from(successfulUserIds).join(', ') || 'none'}`)
                 try {
                     const metrics = await getProposalMetrics({
                         fundNumber,
                         title: projectDetails.title,
                         csrfToken: LIDO_CSRF_TOKEN
                     })
-                    voting = metrics
+                    // Create voting data without user_id for Supabase storage
+                    voting = {
+                        proposalId: metrics.proposalId,
+                        yes_votes_count: metrics.yes_votes_count,
+                        no_votes_count: metrics.no_votes_count,
+                        abstain_votes_count: metrics.abstain_votes_count,
+                        unique_wallets: metrics.unique_wallets
+                    }
+                    userId = metrics.user_id
+
+                    if (userId) {
+                        successfulUserIds.add(userId)
+                        console.log(`[User ID] Tracked successful user ID: ${userId}`)
+                    }
+
                     console.log(`[Metrics] Successfully fetched metrics for project "${projectDetails.title}":`, {
                         proposalId: metrics.proposalId,
                         yes_votes: metrics.yes_votes_count,
                         no_votes: metrics.no_votes_count,
                         abstain_votes: metrics.abstain_votes_count,
-                        unique_wallets: metrics.unique_wallets
+                        unique_wallets: metrics.unique_wallets,
+                        user_id: metrics.user_id
                     })
                 } catch (err) {
                     console.error(`[Metrics] Failed to fetch voting metrics for "${projectDetails.title}":`, err)
+                    // Track failed titles for second pass
+                    failedTitles.push({
+                        projectId,
+                        title: projectDetails.title,
+                        fundNumber
+                    })
                 }
             } else {
                 console.log(`[Metrics] Skipping metrics fetch - missing fundNumber or title`)
+                // Track failed titles for second pass
+                failedTitles.push({
+                    projectId,
+                    title: projectDetails.title,
+                    fundNumber
+                })
             }
 
             // Fetch milestone data
@@ -537,16 +539,130 @@ export default async (req: Request, context: Context) => {
             console.log(`✅ Successfully saved project ${projectId} to Supabase`)
         }
 
+        // Second pass: Try matching failed titles using user IDs
+        console.log(`\n🔄 SECOND PASS: User ID matching`)
+        console.log(`📊 Successful user IDs collected: ${Array.from(successfulUserIds)}`)
+        console.log(`📊 Failed titles to retry: ${failedTitles.length}`)
+
+        if (successfulUserIds.size > 0 && failedTitles.length > 0) {
+            // Get all proposals for each successful user ID
+            const userProposalsMap = new Map<number, any[]>()
+
+            for (const userId of successfulUserIds) {
+                console.log(`\n[User Search] Fetching proposals for user ID: ${userId}`)
+                const userProposals = await getProposalsByUserId(userId, LIDO_CSRF_TOKEN)
+                userProposalsMap.set(userId, userProposals)
+                console.log(`[User Search] Retrieved ${userProposals.length} proposals for user ${userId}`)
+            }
+
+            // Try to match failed titles with user proposals
+            for (const failedTitle of failedTitles) {
+                console.log(`\n[Retry] Attempting to match failed title: "${failedTitle.title}"`)
+
+                let bestMatch = null
+                let bestUserId = null
+
+                // Try to find a match across all user proposals
+                for (const [userId, proposals] of userProposalsMap) {
+                    const match = findProposalByTitle(proposals, failedTitle.title)
+                    if (match) {
+                        bestMatch = match
+                        bestUserId = userId
+                        console.log(`[Retry] Found match for "${failedTitle.title}" in user ${userId}: "${match.title}"`)
+                        break
+                    }
+                }
+
+                if (bestMatch && bestUserId) {
+                    console.log(`[Retry] Successfully matched "${failedTitle.title}" with "${bestMatch.title}" from user ${bestUserId}`)
+
+                    // Get the original project details again
+                    const projectDetails = await getProposalDetails(failedTitle.projectId)
+                    if (!projectDetails) {
+                        console.log(`[Retry] Could not get project details for ${failedTitle.projectId}, skipping`)
+                        continue
+                    }
+
+                    // Extract category and generate URL (reuse the same logic)
+                    let categorySlug = null
+                    if (projectDetails.challenges && (projectDetails.challenges as any).title) {
+                        categorySlug = extractCategoryFromChallenges(projectDetails.challenges as any)
+                    }
+
+                    let url = ''
+                    if (failedTitle.fundNumber && projectDetails.title && categorySlug) {
+                        url = generateCatalystUrl(projectDetails.title, failedTitle.fundNumber, categorySlug)
+                    }
+
+                    // Create voting data from the matched proposal
+                    const voting = {
+                        proposalId: bestMatch.id,
+                        yes_votes_count: bestMatch.yes_votes_count,
+                        no_votes_count: bestMatch.no_votes_count,
+                        abstain_votes_count: bestMatch.abstain_votes_count,
+                        unique_wallets: bestMatch.unique_wallets
+                    }
+
+                    // Fetch milestone data
+                    const snapshotData = await fetchSnapshotData(failedTitle.projectId)
+                    const milestonesCompleted = snapshotData.filter(
+                        (m: any) => m.som_signoff_count > 0 && m.poa_signoff_count > 0
+                    ).length
+
+                    // Prepare data for Supabase
+                    const supabaseData = {
+                        id: projectDetails.id,
+                        title: projectDetails.title,
+                        budget: projectDetails.budget,
+                        milestones_qty: projectDetails.milestones_qty,
+                        funds_distributed: projectDetails.funds_distributed,
+                        project_id: projectDetails.project_id,
+                        challenges: projectDetails.challenges,
+                        name: projectDetails.title,
+                        category: (projectDetails.challenges as any)?.title || '',
+                        url: url,
+                        status: 'In Progress',
+                        finished: '',
+                        voting: voting,
+                        updated_at: new Date().toISOString()
+                    }
+
+                    // Update the existing record in Supabase
+                    const { data, error } = await supabaseUpsert
+                        .from('catalyst_proposals')
+                        .upsert(supabaseData, {
+                            onConflict: 'project_id'
+                        })
+
+                    if (error) {
+                        console.error(`[Retry] Failed to update project ${failedTitle.projectId} in Supabase:`, error)
+                    } else {
+                        console.log(`[Retry] ✅ Successfully updated project ${failedTitle.projectId} with voting data`)
+                        // Update the processed projects list
+                        const existingIndex: number = processedProjects.findIndex(p => p.project_id === failedTitle.projectId)
+                        if (existingIndex >= 0) {
+                            processedProjects[existingIndex] = supabaseData
+                        } else {
+                            processedProjects.push(supabaseData)
+                        }
+                    }
+                } else {
+                    console.log(`[Retry] Could not find match for "${failedTitle.title}" in any user proposals`)
+                }
+            }
+        }
+
         console.log(`\n🎉 Successfully processed ${processedProjects.length} out of ${PROJECT_IDS.length} Catalyst projects`)
         console.log('📊 Final processed projects:', processedProjects.map(p => ({ id: p.project_id, title: p.title })))
-        console.log('👥 User IDs tracked for fallback searches:', Array.from(successfulUserIds))
 
         return new Response(
             JSON.stringify({
                 success: true,
                 message: 'Catalyst proposals fetched and saved successfully',
                 processed_count: processedProjects.length,
-                projects: processedProjects
+                projects: processedProjects,
+                successful_user_ids: Array.from(successfulUserIds),
+                failed_titles_count: failedTitles.length
             }),
             {
                 status: 200,
