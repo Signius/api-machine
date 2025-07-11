@@ -51,14 +51,12 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     }
 
     // 1) Get all funds, find the one matching "Fund ${fundNumber}"
-    console.log(`[Lido API] Fetching funds list...`)
     const fundsRes = await fetch(`${API_BASE}/funds`, { headers })
     if (!fundsRes.ok) {
         console.error(`[Lido API] Failed to fetch funds: ${fundsRes.status} ${fundsRes.statusText}`)
         throw new Error(`Failed to fetch funds: ${fundsRes.status}`)
     }
     const { data: funds } = await fundsRes.json() as { data: any[] }
-    console.log(`[Lido API] Retrieved ${funds.length} funds`)
 
     const fund = funds.find((f: any) => f.title === `Fund ${fundNumber}`)
     if (!fund) {
@@ -66,11 +64,9 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
         throw new Error(`Fund ${fundNumber} not found`)
     }
     const fundId = fund.id
-    console.log(`[Lido API] Found fund with ID: ${fundId}`)
 
     // 2) Search proposals in that fund for the exact title
     const searchTerm = encodeURIComponent(title)
-    console.log(`[Lido API] Searching for proposal "${title}" in fund ${fundId}`)
     const propsRes = await fetch(
         `${API_BASE}/proposals?fund_id=${fundId}&search=${searchTerm}&per_page=5&page=1`,
         { headers }
@@ -80,7 +76,6 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
         throw new Error(`Failed to search proposals: ${propsRes.status}`)
     }
     const propsJson = await propsRes.json() as { data: any[] }
-    console.log(`[Lido API] Found ${propsJson.data.length} proposals matching search`)
 
     const match = propsJson.data.find((p: any) => p.title === title)
     if (!match) {
@@ -88,10 +83,8 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
         throw new Error(`Proposal titled "${title}" not found in Fund ${fundNumber}`)
     }
     const proposalId = match.id
-    console.log(`[Lido API] Found proposal with ID: ${proposalId}`)
 
     // 3) Fetch full proposal details by ID
-    console.log(`[Lido API] Fetching detailed proposal data for ID ${proposalId}`)
     const detailRes = await fetch(`${API_BASE}/proposals/${proposalId}`, { headers })
     if (!detailRes.ok) {
         console.error(`[Lido API] Failed to fetch proposal ${proposalId}: ${detailRes.status} ${detailRes.statusText}`)
@@ -99,12 +92,6 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     }
     const detailResponse = await detailRes.json() as { data: any }
     const { data: detail } = detailResponse
-
-    console.log(`[Lido API] Raw response structure:`, {
-        response_keys: Object.keys(detailResponse),
-        data_keys: detail ? Object.keys(detail) : null,
-        has_data: !!detail
-    })
 
     const {
         yes_votes_count,
@@ -138,23 +125,16 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
         console.log(`[Lido API] No user ID found in any expected fields`)
     }
 
-    // Debug: Check if users exists and log its structure
-    console.log(`[Lido API] Users field debug:`, {
-        has_users_field: 'users' in detail,
-        users_value: detail.users,
-        users_type: typeof detail.users,
-        users_is_array: Array.isArray(detail.users),
-        users_length: detail.users ? detail.users.length : 'N/A'
-    })
-
-    console.log(`[Lido API] Full proposal detail structure:`, {
-        has_users: !!users,
-        users_length: users ? users.length : 0,
-        users_structure: users ? users.slice(0, 2) : null,
-        full_detail_keys: Object.keys(detail),
-        detail_id: detail.id,
-        detail_title: detail.title
-    })
+    // Debug: Check if users exists and log its structure (only if no user ID found)
+    if (!userId) {
+        console.log(`[Lido API] Users field debug:`, {
+            has_users_field: 'users' in detail,
+            users_value: detail.users,
+            users_type: typeof detail.users,
+            users_is_array: Array.isArray(detail.users),
+            users_length: detail.users ? detail.users.length : 'N/A'
+        })
+    }
 
     console.log(`[Lido API] Successfully retrieved voting metrics:`, {
         yes_votes: yes_votes_count,
@@ -445,19 +425,10 @@ export default async (req: Request, context: Context) => {
                 continue
             }
 
-            console.log(`✅ Found project details for "${projectDetails.title}"`)
-
             // Determine fund number from challenges
             let fundNumber = null
             if (projectDetails.challenges && (projectDetails.challenges as any).title) {
                 fundNumber = extractFundNumberFromChallenges(projectDetails.challenges as any)
-                if (fundNumber) {
-                    console.log(`[Fund] Extracted fund number ${fundNumber} from challenges: ${(projectDetails.challenges as any).title}`)
-                } else {
-                    console.log(`[Fund] Could not extract fund number from challenges: ${(projectDetails.challenges as any).title}`)
-                }
-            } else {
-                console.log(`[Fund] No challenges data available for project ${projectId}`)
             }
 
             // If not found in challenges, try to get fund number from category
@@ -466,9 +437,6 @@ export default async (req: Request, context: Context) => {
                 const catMatch = category.match(/^F(\d+)/i)
                 if (catMatch) {
                     fundNumber = catMatch[1]
-                    console.log(`[Fund] Extracted fund number ${fundNumber} from category: ${category}`)
-                } else {
-                    console.log(`[Fund] Could not extract fund number from category: ${category}`)
                 }
             }
 
@@ -477,41 +445,25 @@ export default async (req: Request, context: Context) => {
                 const pidStr = String(projectDetails.project_id)
                 if (pidStr.length > 5) {
                     fundNumber = pidStr.substring(0, pidStr.length - 5)
-                    console.log(`[Fund] Extracted fund number ${fundNumber} from project_id: ${projectDetails.project_id}`)
-                } else {
-                    console.log(`[Fund] Project ID too short for fund extraction: ${projectDetails.project_id}`)
                 }
             }
-
-            console.log(`[Fund] Final fund number: ${fundNumber || 'NOT FOUND'}`)
 
             // Extract category from challenges data
             let categorySlug = null
             if (projectDetails.challenges && (projectDetails.challenges as any).title) {
                 categorySlug = extractCategoryFromChallenges(projectDetails.challenges as any)
-                if (categorySlug) {
-                    console.log(`[Category] Extracted category slug "${categorySlug}" from challenges: ${(projectDetails.challenges as any).title}`)
-                } else {
-                    console.log(`[Category] Could not extract category slug from challenges: ${(projectDetails.challenges as any).title}`)
-                }
-            } else {
-                console.log(`[Category] No challenges data available for category extraction`)
             }
 
             // Generate the proper Catalyst URL with fund number and category
             let url = ''
             if (fundNumber && projectDetails.title && categorySlug) {
                 url = generateCatalystUrl(projectDetails.title, fundNumber, categorySlug)
-                console.log(`[URL] Generated Catalyst URL for "${projectDetails.title}": ${url}`)
-            } else {
-                console.log(`[URL] Could not generate URL - missing: fundNumber=${!!fundNumber}, title=${!!projectDetails.title}, categorySlug=${!!categorySlug}`)
             }
 
             // Fetch voting metrics if we have fund number and title
             let voting = null
             let userId = null
             if (fundNumber && projectDetails.title) {
-                console.log(`[Metrics] Fetching metrics for project "${projectDetails.title}" (ID: ${projectId})`)
                 try {
                     const metrics = await getProposalMetrics({
                         fundNumber,
@@ -530,21 +482,12 @@ export default async (req: Request, context: Context) => {
 
                     if (userId) {
                         successfulUserIds.add(userId)
-                        console.log(`[User ID] ✅ Tracked successful user ID: ${userId}`)
-                    } else {
-                        console.log(`[User ID] ❌ No user ID found in successful metrics for "${projectDetails.title}"`)
+                        console.log(`[User ID] ✅ Tracked user ID: ${userId}`)
                     }
 
-                    console.log(`[Metrics] Successfully fetched metrics for project "${projectDetails.title}":`, {
-                        proposalId: metrics.proposalId,
-                        yes_votes: metrics.yes_votes_count,
-                        no_votes: metrics.no_votes_count,
-                        abstain_votes: metrics.abstain_votes_count,
-                        unique_wallets: metrics.unique_wallets,
-                        user_id: metrics.user_id
-                    })
+                    console.log(`[Metrics] ✅ Found voting data for "${projectDetails.title}"`)
                 } catch (err) {
-                    console.error(`[Metrics] Failed to fetch voting metrics for "${projectDetails.title}":`, err)
+                    console.error(`[Metrics] ❌ Failed to fetch voting metrics for "${projectDetails.title}":`, err)
                     // Track failed titles for second pass
                     failedTitles.push({
                         projectId,
@@ -553,7 +496,7 @@ export default async (req: Request, context: Context) => {
                     })
                 }
             } else {
-                console.log(`[Metrics] Skipping metrics fetch - missing fundNumber or title`)
+                console.log(`[Metrics] ⏭️ Skipping metrics fetch - missing fundNumber or title`)
                 // Track failed titles for second pass
                 failedTitles.push({
                     projectId,
@@ -563,14 +506,10 @@ export default async (req: Request, context: Context) => {
             }
 
             // Fetch milestone data
-            console.log(`[Milestones] Fetching snapshot data for project ${projectId}`)
             const snapshotData = await fetchSnapshotData(projectId)
-            console.log(`[Milestones] Retrieved ${snapshotData.length} milestone records`)
-
             const milestonesCompleted = snapshotData.filter(
                 (m: any) => m.som_signoff_count > 0 && m.poa_signoff_count > 0
             ).length
-            console.log(`[Milestones] Found ${milestonesCompleted} completed milestones`)
 
             // Prepare data for Supabase
             const supabaseData = {
@@ -590,14 +529,6 @@ export default async (req: Request, context: Context) => {
                 updated_at: new Date().toISOString()
             }
 
-            console.log(`[Supabase] Preparing to upsert data for project ${projectId}:`, {
-                title: supabaseData.title,
-                budget: supabaseData.budget,
-                project_id: supabaseData.project_id,
-                has_voting_data: !!supabaseData.voting,
-                has_challenges: !!supabaseData.challenges
-            })
-
             // Upsert data to Supabase
             const { data, error } = await supabaseUpsert
                 .from('catalyst_proposals')
@@ -611,40 +542,25 @@ export default async (req: Request, context: Context) => {
             }
 
             processedProjects.push(supabaseData)
-            console.log(`✅ Successfully saved project ${projectId} to Supabase`)
+            console.log(`✅ Saved project ${projectId}: "${projectDetails.title}"`)
         }
 
         // Second pass: Try matching failed titles using user IDs
         console.log(`\n🔄 SECOND PASS: User ID matching`)
-        console.log(`📊 Successful user IDs collected: ${Array.from(successfulUserIds)}`)
-        console.log(`📊 Failed titles to retry: ${failedTitles.length}`)
-        console.log(`📋 Failed titles details:`, failedTitles.map(ft => ({ projectId: ft.projectId, title: ft.title, fundNumber: ft.fundNumber })))
-
-        if (successfulUserIds.size > 0 && failedTitles.length > 0) {
-            console.log(`[Second Pass] ✅ Proceeding with second pass - have ${successfulUserIds.size} user IDs and ${failedTitles.length} failed titles`)
-        } else {
-            console.log(`[Second Pass] ❌ Skipping second pass - no successful user IDs (${successfulUserIds.size}) or no failed titles (${failedTitles.length})`)
-        }
+        console.log(`📊 User IDs: ${Array.from(successfulUserIds).length}, Failed titles: ${failedTitles.length}`)
 
         if (successfulUserIds.size > 0 && failedTitles.length > 0) {
             // Get all proposals for each successful user ID
             const userProposalsMap = new Map<number, any[]>()
 
             for (const userId of successfulUserIds) {
-                console.log(`\n[User Search] Fetching proposals for user ID: ${userId}`)
                 const userProposals = await getProposalsByUserId(userId, LIDO_CSRF_TOKEN)
                 userProposalsMap.set(userId, userProposals)
-                console.log(`[User Search] Retrieved ${userProposals.length} proposals for user ${userId}`)
-
-                if (userProposals.length > 0) {
-                    console.log(`[User Search] Sample proposal titles for user ${userId}:`, userProposals.slice(0, 3).map(p => p.title))
-                }
+                console.log(`[User Search] User ${userId}: ${userProposals.length} proposals`)
             }
 
             // Try to match failed titles with user proposals
             for (const failedTitle of failedTitles) {
-                console.log(`\n[Retry] Attempting to match failed title: "${failedTitle.title}"`)
-
                 let bestMatch = null
                 let bestUserId = null
 
@@ -654,13 +570,12 @@ export default async (req: Request, context: Context) => {
                     if (match) {
                         bestMatch = match
                         bestUserId = userId
-                        console.log(`[Retry] Found match for "${failedTitle.title}" in user ${userId}: "${match.title}"`)
                         break
                     }
                 }
 
                 if (bestMatch && bestUserId) {
-                    console.log(`[Retry] Successfully matched "${failedTitle.title}" with "${bestMatch.title}" from user ${bestUserId}`)
+                    console.log(`[Retry] ✅ Matched "${failedTitle.title}" with "${bestMatch.title}"`)
 
                     // Get the original project details again
                     const projectDetails = await getProposalDetails(failedTitle.projectId)
@@ -721,9 +636,9 @@ export default async (req: Request, context: Context) => {
                         })
 
                     if (error) {
-                        console.error(`[Retry] Failed to update project ${failedTitle.projectId} in Supabase:`, error)
+                        console.error(`[Retry] ❌ Failed to update project ${failedTitle.projectId} in Supabase:`, error)
                     } else {
-                        console.log(`[Retry] ✅ Successfully updated project ${failedTitle.projectId} with voting data`)
+                        console.log(`[Retry] ✅ Updated project ${failedTitle.projectId} with voting data`)
                         // Update the processed projects list
                         const existingIndex: number = processedProjects.findIndex(p => p.project_id === failedTitle.projectId)
                         if (existingIndex >= 0) {
@@ -733,13 +648,24 @@ export default async (req: Request, context: Context) => {
                         }
                     }
                 } else {
-                    console.log(`[Retry] Could not find match for "${failedTitle.title}" in any user proposals`)
+                    console.log(`[Retry] ❌ No match found for "${failedTitle.title}"`)
                 }
             }
         }
 
-        console.log(`\n🎉 Successfully processed ${processedProjects.length} out of ${PROJECT_IDS.length} Catalyst projects`)
-        console.log('📊 Final processed projects:', processedProjects.map(p => ({ id: p.project_id, title: p.title })))
+        // Calculate final statistics
+        const projectsWithVoting = processedProjects.filter(p => p.voting).length
+        const projectsWithoutVoting = processedProjects.length - projectsWithVoting
+        const secondPassSuccesses = processedProjects.filter(p => p.voting && !PROJECT_IDS.includes(p.project_id)).length
+
+        console.log(`\n🎉 Processing Complete!`)
+        console.log(`📊 Summary:`)
+        console.log(`   • Total projects processed: ${processedProjects.length}/${PROJECT_IDS.length}`)
+        console.log(`   • Projects with voting data: ${projectsWithVoting}`)
+        console.log(`   • Projects without voting data: ${projectsWithoutVoting}`)
+        console.log(`   • Second pass successes: ${secondPassSuccesses}`)
+        console.log(`   • Successful user IDs collected: ${successfulUserIds.size}`)
+        console.log(`   • Failed titles retried: ${failedTitles.length}`)
 
         return new Response(
             JSON.stringify({
