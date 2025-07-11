@@ -110,6 +110,12 @@ async function getProposalMetrics({ fundNumber, title, csrfToken }: {
     // Extract user_id from the users array
     const userId = users && users.length > 0 ? users[0].id : null
 
+    console.log(`[Lido API] Full proposal detail structure:`, {
+        has_users: !!users,
+        users_length: users ? users.length : 0,
+        users_structure: users ? users.slice(0, 2) : null
+    })
+
     console.log(`[Lido API] Successfully retrieved voting metrics:`, {
         yes_votes: yes_votes_count,
         no_votes: no_votes_count,
@@ -157,10 +163,15 @@ async function getProposalsByUserId(userId: number, csrfToken: string) {
  * Attempts to find a proposal by title from a list of user proposals.
  */
 function findProposalByTitle(proposals: any[], targetTitle: string): any | null {
+    console.log(`[Title Matching] Attempting to match "${targetTitle}" against ${proposals.length} proposals`)
+
+    // Log all available proposal titles for debugging
+    console.log(`[Title Matching] Available proposal titles:`, proposals.map(p => p.title))
+
     // First try exact match
     const exactMatch = proposals.find(p => p.title === targetTitle)
     if (exactMatch) {
-        console.log(`[Lido API] Found exact title match: "${targetTitle}"`)
+        console.log(`[Title Matching] ✅ Found exact title match: "${targetTitle}"`)
         return exactMatch
     }
 
@@ -169,7 +180,7 @@ function findProposalByTitle(proposals: any[], targetTitle: string): any | null 
         p.title.toLowerCase() === targetTitle.toLowerCase()
     )
     if (caseInsensitiveMatch) {
-        console.log(`[Lido API] Found case-insensitive title match: "${targetTitle}"`)
+        console.log(`[Title Matching] ✅ Found case-insensitive title match: "${targetTitle}"`)
         return caseInsensitiveMatch
     }
 
@@ -179,11 +190,33 @@ function findProposalByTitle(proposals: any[], targetTitle: string): any | null 
         targetTitle.toLowerCase().includes(p.title.toLowerCase())
     )
     if (partialMatch) {
-        console.log(`[Lido API] Found partial title match: "${targetTitle}" -> "${partialMatch.title}"`)
+        console.log(`[Title Matching] ✅ Found partial title match: "${targetTitle}" -> "${partialMatch.title}"`)
         return partialMatch
     }
 
-    console.log(`[Lido API] No title match found for "${targetTitle}" in user proposals`)
+    // Try fuzzy matching - remove common words and compare
+    const cleanTarget = targetTitle.toLowerCase()
+        .replace(/\b(by|the|and|or|for|with|in|on|at|to|from|of|a|an)\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+    const fuzzyMatch = proposals.find(p => {
+        const cleanProposal = p.title.toLowerCase()
+            .replace(/\b(by|the|and|or|for|with|in|on|at|to|from|of|a|an)\b/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+
+        return cleanProposal === cleanTarget ||
+            cleanProposal.includes(cleanTarget) ||
+            cleanTarget.includes(cleanProposal)
+    })
+
+    if (fuzzyMatch) {
+        console.log(`[Title Matching] ✅ Found fuzzy title match: "${targetTitle}" -> "${fuzzyMatch.title}"`)
+        return fuzzyMatch
+    }
+
+    console.log(`[Title Matching] ❌ No title match found for "${targetTitle}" in user proposals`)
     return null
 }
 
@@ -457,7 +490,9 @@ export default async (req: Request, context: Context) => {
 
                     if (userId) {
                         successfulUserIds.add(userId)
-                        console.log(`[User ID] Tracked successful user ID: ${userId}`)
+                        console.log(`[User ID] ✅ Tracked successful user ID: ${userId}`)
+                    } else {
+                        console.log(`[User ID] ❌ No user ID found in successful metrics for "${projectDetails.title}"`)
                     }
 
                     console.log(`[Metrics] Successfully fetched metrics for project "${projectDetails.title}":`, {
@@ -543,6 +578,13 @@ export default async (req: Request, context: Context) => {
         console.log(`\n🔄 SECOND PASS: User ID matching`)
         console.log(`📊 Successful user IDs collected: ${Array.from(successfulUserIds)}`)
         console.log(`📊 Failed titles to retry: ${failedTitles.length}`)
+        console.log(`📋 Failed titles details:`, failedTitles.map(ft => ({ projectId: ft.projectId, title: ft.title, fundNumber: ft.fundNumber })))
+
+        if (successfulUserIds.size > 0 && failedTitles.length > 0) {
+            console.log(`[Second Pass] ✅ Proceeding with second pass - have ${successfulUserIds.size} user IDs and ${failedTitles.length} failed titles`)
+        } else {
+            console.log(`[Second Pass] ❌ Skipping second pass - no successful user IDs (${successfulUserIds.size}) or no failed titles (${failedTitles.length})`)
+        }
 
         if (successfulUserIds.size > 0 && failedTitles.length > 0) {
             // Get all proposals for each successful user ID
@@ -553,6 +595,10 @@ export default async (req: Request, context: Context) => {
                 const userProposals = await getProposalsByUserId(userId, LIDO_CSRF_TOKEN)
                 userProposalsMap.set(userId, userProposals)
                 console.log(`[User Search] Retrieved ${userProposals.length} proposals for user ${userId}`)
+
+                if (userProposals.length > 0) {
+                    console.log(`[User Search] Sample proposal titles for user ${userId}:`, userProposals.slice(0, 3).map(p => p.title))
+                }
             }
 
             // Try to match failed titles with user proposals
