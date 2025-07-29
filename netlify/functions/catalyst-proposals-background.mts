@@ -36,6 +36,113 @@ if (!LIDO_CSRF_TOKEN) {
 const API_BASE = 'https://www.lidonation.com/api/catalyst-explorer'
 
 /**
+ * Scrapes milestone content from the milestones.projectcatalyst.io website.
+ * Extracts text from the div with class "poa-content html-text".
+ */
+async function scrapeMilestoneContent(projectId: string, milestoneNumber: number): Promise<string | null> {
+    const url = `https://milestones.projectcatalyst.io/projects/${projectId}/milestones/${milestoneNumber}`
+
+    try {
+        console.log(`[Milestone Scraping] Fetching milestone ${milestoneNumber} for project ${projectId}`)
+
+        const response = await axios.get(url, {
+            timeout: 10000, // 10 second timeout
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        })
+
+        if (response.status !== 200) {
+            console.log(`[Milestone Scraping] HTTP ${response.status} for milestone ${milestoneNumber} of project ${projectId}`)
+            return null
+        }
+
+        const html = response.data
+
+        // Extract text from div with class "poa-content html-text"
+        // Try multiple patterns to be more robust
+        let poaContentMatch = html.match(/<div[^>]*class="[^"]*poa-content[^"]*html-text[^"]*"[^>]*>(.*?)<\/div>/s)
+
+        // If not found, try alternative patterns
+        if (!poaContentMatch) {
+            poaContentMatch = html.match(/<div[^>]*class="[^"]*html-text[^"]*poa-content[^"]*"[^>]*>(.*?)<\/div>/s)
+        }
+
+        // If still not found, try looking for any div with poa-content class
+        if (!poaContentMatch) {
+            poaContentMatch = html.match(/<div[^>]*class="[^"]*poa-content[^"]*"[^>]*>(.*?)<\/div>/s)
+        }
+
+        if (poaContentMatch && poaContentMatch[1]) {
+            // Clean up the HTML content to extract just the text
+            const content = poaContentMatch[1]
+                .replace(/<[^>]*>/g, '') // Remove HTML tags
+                .replace(/&nbsp;/g, ' ') // Replace &nbsp; with spaces
+                .replace(/&amp;/g, '&') // Replace &amp; with &
+                .replace(/&lt;/g, '<') // Replace &lt; with <
+                .replace(/&gt;/g, '>') // Replace &gt; with >
+                .replace(/&quot;/g, '"') // Replace &quot; with "
+                .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                .trim()
+
+            console.log(`[Milestone Scraping] ✅ Successfully scraped milestone ${milestoneNumber} for project ${projectId} (${content.length} characters)`)
+            return content
+        } else {
+            console.log(`[Milestone Scraping] ❌ No poa-content div found for milestone ${milestoneNumber} of project ${projectId}`)
+            return null
+        }
+    } catch (error) {
+        console.error(`[Milestone Scraping] ❌ Error scraping milestone ${milestoneNumber} for project ${projectId}:`, error)
+        if (axios.isAxiosError(error)) {
+            if (error.response?.status === 404) {
+                console.log(`[Milestone Scraping] 404 - Milestone ${milestoneNumber} not found for project ${projectId}`)
+            } else {
+                console.log(`[Milestone Scraping] HTTP ${error.response?.status} for milestone ${milestoneNumber} of project ${projectId}`)
+            }
+        }
+        return null
+    }
+}
+
+/**
+ * Scrapes all milestones for a project and returns them as a JSON object.
+ */
+async function scrapeAllMilestones(projectId: string, milestonesQty: number): Promise<Record<string, string> | null> {
+    if (!milestonesQty || milestonesQty <= 0) {
+        console.log(`[Milestone Scraping] ⏭️ No milestones to scrape for project ${projectId} (milestones_qty: ${milestonesQty})`)
+        return null
+    }
+
+    console.log(`[Milestone Scraping] 🚀 Starting to scrape ${milestonesQty} milestones for project ${projectId}`)
+
+    const milestonesContent: Record<string, string> = {}
+    let successfulScrapes = 0
+
+    // Scrape each milestone
+    for (let milestoneNumber = 1; milestoneNumber <= milestonesQty; milestoneNumber++) {
+        const content = await scrapeMilestoneContent(projectId, milestoneNumber)
+
+        if (content) {
+            milestonesContent[milestoneNumber.toString()] = content
+            successfulScrapes++
+        } else {
+            // Still add an entry but with null/empty to maintain milestone numbering
+            milestonesContent[milestoneNumber.toString()] = ''
+        }
+
+        // Add a small delay between requests to be respectful to the server
+        if (milestoneNumber < milestonesQty) {
+            await new Promise(resolve => setTimeout(resolve, 500)) // 500ms delay
+        }
+    }
+
+    console.log(`[Milestone Scraping] 📊 Completed scraping for project ${projectId}: ${successfulScrapes}/${milestonesQty} milestones successful`)
+
+    // Only return the object if we have at least some content
+    return successfulScrapes > 0 ? milestonesContent : null
+}
+
+/**
  * Fetches voting metrics for a single proposal by title & fund number.
  */
 async function getProposalMetrics({ fundNumber, title, csrfToken }: {
@@ -512,6 +619,9 @@ export default async (req: Request, context: Context) => {
                 (m: any) => m.som_signoff_count > 0 && m.poa_signoff_count > 0
             ).length
 
+            // Scrape milestone content
+            const milestonesContent = await scrapeAllMilestones(projectId, projectDetails.milestones_qty)
+
             // Prepare data for Supabase (but don't push yet)
             const supabaseData = {
                 id: projectDetails.id,
@@ -530,6 +640,7 @@ export default async (req: Request, context: Context) => {
                 finished: '',
                 voting: voting,
                 milestones_completed: milestonesCompleted,
+                milestones_content: milestonesContent,
                 updated_at: new Date().toISOString()
             }
 
@@ -603,6 +714,9 @@ export default async (req: Request, context: Context) => {
                         (m: any) => m.som_signoff_count > 0 && m.poa_signoff_count > 0
                     ).length
 
+                    // Scrape milestone content
+                    const milestonesContent = await scrapeAllMilestones(failedTitle.projectId, projectDetails.milestones_qty)
+
                     // Prepare updated data for Supabase (but don't push yet)
                     const updatedSupabaseData = {
                         id: projectDetails.id,
@@ -621,6 +735,7 @@ export default async (req: Request, context: Context) => {
                         finished: '',
                         voting: voting,
                         milestones_completed: milestonesCompleted,
+                        milestones_content: milestonesContent,
                         updated_at: new Date().toISOString()
                     }
 
