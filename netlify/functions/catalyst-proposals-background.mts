@@ -38,7 +38,7 @@ const API_BASE = 'https://www.lidonation.com/api/catalyst-explorer'
 
 /**
  * Scrapes milestone content from the milestones.projectcatalyst.io website.
- * Extracts text from the div with class "poa-content html-text" using Cheerio.
+ * Since this is a Vue.js SPA, we need to try multiple approaches.
  */
 async function scrapeMilestoneContent(projectId: string, milestoneNumber: number): Promise<string | null> {
     const url = `https://milestones.projectcatalyst.io/projects/${projectId}/milestones/${milestoneNumber}`
@@ -63,7 +63,71 @@ async function scrapeMilestoneContent(projectId: string, milestoneNumber: number
         // Load HTML into Cheerio
         const $ = cheerio.load(html)
 
-        // Try multiple selectors to find the milestone content
+        // Check if this is a Vue.js SPA (just has <div id="app"></div>)
+        const appDiv = $('#app')
+        if (appDiv.length > 0 && appDiv.html() === '') {
+            console.log(`[Milestone Scraping] 🔍 Detected Vue.js SPA - waiting for content to load`)
+
+            // Wait for the JavaScript to execute and content to load
+            // Try multiple times with increasing delays
+            const maxRetries = 3
+            const delays = [2000, 4000, 6000] // 2s, 4s, 6s
+
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                console.log(`[Milestone Scraping] 🔄 Attempt ${attempt + 1}/${maxRetries} - waiting ${delays[attempt]}ms`)
+
+                // Wait for the specified delay
+                await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+
+                // Fetch the page again to see if content has loaded
+                try {
+                    const retryResponse = await axios.get(url, {
+                        timeout: 10000,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        }
+                    })
+
+                    if (retryResponse.status === 200) {
+                        const retryHtml = retryResponse.data
+                        const $retry = cheerio.load(retryHtml)
+
+                        // Check if content has loaded
+                        const poaContentDiv = $retry('div.poa-content.html-text, div.html-text.poa-content')
+                        if (poaContentDiv.length > 0) {
+                            const content = poaContentDiv.text().trim()
+                            if (content) {
+                                console.log(`[Milestone Scraping] ✅ Content loaded after ${delays[attempt]}ms delay`)
+                                return content
+                                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                                    .trim()
+                            }
+                        }
+
+                        // Also try the data-v attribute selector
+                        const vueDiv = $retry('div[data-v-d48355d0]')
+                        if (vueDiv.length > 0) {
+                            const content = vueDiv.text().trim()
+                            if (content) {
+                                console.log(`[Milestone Scraping] ✅ Vue.js content loaded after ${delays[attempt]}ms delay`)
+                                return content
+                                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                                    .trim()
+                            }
+                        }
+
+                        console.log(`[Milestone Scraping] 🔄 Content not loaded yet, retrying...`)
+                    }
+                } catch (retryError) {
+                    console.log(`[Milestone Scraping] ❌ Retry attempt ${attempt + 1} failed:`, retryError)
+                }
+            }
+
+            console.log(`[Milestone Scraping] ❌ Content never loaded after ${maxRetries} attempts for milestone ${milestoneNumber} of project ${projectId}`)
+            return null
+        }
+
+        // If not SPA, try the original HTML parsing approach
         let content = ''
 
         // First, try to find div with both poa-content and html-text classes (in any order)
@@ -100,15 +164,6 @@ async function scrapeMilestoneContent(projectId: string, milestoneNumber: number
                             }
                         })
                         console.log(`[Milestone Scraping] 🔍 Available div classes:`, Array.from(classes))
-
-                        // Also log the actual HTML structure around where we expect the content
-                        console.log(`[Milestone Scraping] 🔍 HTML snippet around expected content:`)
-                        const bodyContent = $('body').html()
-                        if (bodyContent) {
-                            console.log(`[Milestone Scraping] 🔍 Body HTML length: ${bodyContent.length} characters`)
-                            // Log first 1000 characters to see the structure
-                            console.log(`[Milestone Scraping] 🔍 First 1000 chars:`, bodyContent.substring(0, 1000))
-                        }
 
                         console.log(`[Milestone Scraping] ❌ No content found for milestone ${milestoneNumber} of project ${projectId}`)
                         return null
