@@ -3,6 +3,7 @@ import type { Context } from '@netlify/functions'
 import { config as dotenv } from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 import axios from 'axios'
+import * as cheerio from 'cheerio'
 
 dotenv()
 
@@ -37,7 +38,7 @@ const API_BASE = 'https://www.lidonation.com/api/catalyst-explorer'
 
 /**
  * Scrapes milestone content from the milestones.projectcatalyst.io website.
- * Extracts text from the div with class "poa-content html-text".
+ * Extracts text from the div with class "poa-content html-text" using Cheerio.
  */
 async function scrapeMilestoneContent(projectId: string, milestoneNumber: number): Promise<string | null> {
     const url = `https://milestones.projectcatalyst.io/projects/${projectId}/milestones/${milestoneNumber}`
@@ -59,36 +60,73 @@ async function scrapeMilestoneContent(projectId: string, milestoneNumber: number
 
         const html = response.data
 
-        // Extract text from div with class "poa-content html-text"
-        // Try multiple patterns to be more robust
-        let poaContentMatch = html.match(/<div[^>]*class="[^"]*poa-content[^"]*html-text[^"]*"[^>]*>(.*?)<\/div>/s)
+        // Load HTML into Cheerio
+        const $ = cheerio.load(html)
 
-        // If not found, try alternative patterns
-        if (!poaContentMatch) {
-            poaContentMatch = html.match(/<div[^>]*class="[^"]*html-text[^"]*poa-content[^"]*"[^>]*>(.*?)<\/div>/s)
+        // Try multiple selectors to find the milestone content
+        let content = ''
+
+        // First, try to find div with both poa-content and html-text classes (in any order)
+        const poaContentDiv = $('div.poa-content.html-text, div.html-text.poa-content')
+        if (poaContentDiv.length > 0) {
+            content = poaContentDiv.text().trim()
+            console.log(`[Milestone Scraping] ✅ Found content using div.poa-content.html-text selector`)
+        } else {
+            // Try just poa-content class
+            const poaDiv = $('div.poa-content')
+            if (poaDiv.length > 0) {
+                content = poaDiv.text().trim()
+                console.log(`[Milestone Scraping] ✅ Found content using div.poa-content selector`)
+            } else {
+                // Try html-text class
+                const htmlDiv = $('div.html-text')
+                if (htmlDiv.length > 0) {
+                    content = htmlDiv.text().trim()
+                    console.log(`[Milestone Scraping] ✅ Found content using div.html-text selector`)
+                } else {
+                    // Last resort: look for any div with data-v attribute (Vue.js components)
+                    const vueDiv = $('div[data-v-d48355d0]')
+                    if (vueDiv.length > 0) {
+                        content = vueDiv.text().trim()
+                        console.log(`[Milestone Scraping] ✅ Found content using Vue.js data-v selector`)
+                    } else {
+                        // Debug: log all div classes to help understand the structure
+                        const allDivs = $('div')
+                        const classes = new Set<string>()
+                        allDivs.each((_, el) => {
+                            const className = $(el).attr('class')
+                            if (className) {
+                                className.split(' ').forEach(cls => classes.add(cls))
+                            }
+                        })
+                        console.log(`[Milestone Scraping] 🔍 Available div classes:`, Array.from(classes))
+
+                        // Also log the actual HTML structure around where we expect the content
+                        console.log(`[Milestone Scraping] 🔍 HTML snippet around expected content:`)
+                        const bodyContent = $('body').html()
+                        if (bodyContent) {
+                            console.log(`[Milestone Scraping] 🔍 Body HTML length: ${bodyContent.length} characters`)
+                            // Log first 1000 characters to see the structure
+                            console.log(`[Milestone Scraping] 🔍 First 1000 chars:`, bodyContent.substring(0, 1000))
+                        }
+
+                        console.log(`[Milestone Scraping] ❌ No content found for milestone ${milestoneNumber} of project ${projectId}`)
+                        return null
+                    }
+                }
+            }
         }
 
-        // If still not found, try looking for any div with poa-content class
-        if (!poaContentMatch) {
-            poaContentMatch = html.match(/<div[^>]*class="[^"]*poa-content[^"]*"[^>]*>(.*?)<\/div>/s)
-        }
-
-        if (poaContentMatch && poaContentMatch[1]) {
-            // Clean up the HTML content to extract just the text
-            const content = poaContentMatch[1]
-                .replace(/<[^>]*>/g, '') // Remove HTML tags
-                .replace(/&nbsp;/g, ' ') // Replace &nbsp; with spaces
-                .replace(/&amp;/g, '&') // Replace &amp; with &
-                .replace(/&lt;/g, '<') // Replace &lt; with <
-                .replace(/&gt;/g, '>') // Replace &gt; with >
-                .replace(/&quot;/g, '"') // Replace &quot; with "
+        // Clean up the content
+        if (content) {
+            content = content
                 .replace(/\s+/g, ' ') // Replace multiple spaces with single space
                 .trim()
 
             console.log(`[Milestone Scraping] ✅ Successfully scraped milestone ${milestoneNumber} for project ${projectId} (${content.length} characters)`)
             return content
         } else {
-            console.log(`[Milestone Scraping] ❌ No poa-content div found for milestone ${milestoneNumber} of project ${projectId}`)
+            console.log(`[Milestone Scraping] ❌ Empty content found for milestone ${milestoneNumber} of project ${projectId}`)
             return null
         }
     } catch (error) {
