@@ -4,7 +4,7 @@ import { config as dotenv } from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 import axios from 'axios'
 import * as cheerio from 'cheerio'
-import puppeteer from 'puppeteer'
+import puppeteer from 'puppeteer-core'
 
 dotenv()
 
@@ -69,12 +69,15 @@ async function scrapeMilestoneContent(projectId: string, milestoneNumber: number
         if (appDiv.length > 0 && appDiv.html() === '') {
             console.log(`[Milestone Scraping] 🔍 Detected Vue.js SPA - using Puppeteer to render content`)
 
-            // Use Puppeteer to handle the Vue.js SPA
+            // Try Puppeteer first, but fall back to alternative methods if it fails
+            console.log(`[Milestone Scraping] 🔍 Attempting Puppeteer for Vue.js SPA`)
+
             let browser = null
             try {
                 // Launch browser with specific arguments for Netlify environment
                 browser = await puppeteer.launch({
                     headless: true,
+                    executablePath: process.env.CHROME_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
@@ -83,7 +86,9 @@ async function scrapeMilestoneContent(projectId: string, milestoneNumber: number
                         '--no-first-run',
                         '--no-zygote',
                         '--single-process',
-                        '--disable-gpu'
+                        '--disable-gpu',
+                        '--disable-web-security',
+                        '--disable-features=VizDisplayCompositor'
                     ]
                 })
 
@@ -144,7 +149,64 @@ async function scrapeMilestoneContent(projectId: string, milestoneNumber: number
 
             } catch (puppeteerError) {
                 console.error(`[Milestone Scraping] ❌ Puppeteer error:`, puppeteerError)
-                return null
+                console.log(`[Milestone Scraping] 🔄 Falling back to alternative method`)
+
+                // Fallback: Try with different headers and longer timeout
+                try {
+                    console.log(`[Milestone Scraping] 🔄 Trying alternative HTTP request method`)
+
+                    const fallbackResponse = await axios.get(url, {
+                        timeout: 30000, // 30 second timeout
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                            'Accept-Language': 'en-US,en;q=0.5',
+                            'Accept-Encoding': 'gzip, deflate, br',
+                            'Connection': 'keep-alive',
+                            'Upgrade-Insecure-Requests': '1',
+                            'Sec-Fetch-Dest': 'document',
+                            'Sec-Fetch-Mode': 'navigate',
+                            'Sec-Fetch-Site': 'none',
+                            'Cache-Control': 'max-age=0'
+                        }
+                    })
+
+                    if (fallbackResponse.status === 200) {
+                        const fallbackHtml = fallbackResponse.data
+                        const $fallback = cheerio.load(fallbackHtml)
+
+                        // Check if content is now available
+                        const poaContentDiv = $fallback('div.poa-content.html-text, div.html-text.poa-content')
+                        if (poaContentDiv.length > 0) {
+                            const content = poaContentDiv.text().trim()
+                            if (content) {
+                                console.log(`[Milestone Scraping] ✅ Found content with fallback method`)
+                                return content
+                                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                                    .trim()
+                            }
+                        }
+
+                        // Also try the data-v attribute selector
+                        const vueDiv = $fallback('div[data-v-d48355d0]')
+                        if (vueDiv.length > 0) {
+                            const content = vueDiv.text().trim()
+                            if (content) {
+                                console.log(`[Milestone Scraping] ✅ Found Vue.js content with fallback method`)
+                                return content
+                                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                                    .trim()
+                            }
+                        }
+                    }
+
+                    console.log(`[Milestone Scraping] ❌ Fallback method also failed`)
+                    return null
+
+                } catch (fallbackError) {
+                    console.error(`[Milestone Scraping] ❌ Fallback method error:`, fallbackError)
+                    return null
+                }
             } finally {
                 // Always close the browser
                 if (browser) {
