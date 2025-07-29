@@ -4,6 +4,7 @@ import { config as dotenv } from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 import axios from 'axios'
 import * as cheerio from 'cheerio'
+import puppeteer from 'puppeteer'
 
 dotenv()
 
@@ -66,65 +67,95 @@ async function scrapeMilestoneContent(projectId: string, milestoneNumber: number
         // Check if this is a Vue.js SPA (just has <div id="app"></div>)
         const appDiv = $('#app')
         if (appDiv.length > 0 && appDiv.html() === '') {
-            console.log(`[Milestone Scraping] 🔍 Detected Vue.js SPA - waiting for content to load`)
+            console.log(`[Milestone Scraping] 🔍 Detected Vue.js SPA - using Puppeteer to render content`)
 
-            // Wait for the JavaScript to execute and content to load
-            // Try multiple times with increasing delays
-            const maxRetries = 3
-            const delays = [2000, 4000, 6000] // 2s, 4s, 6s
+            // Use Puppeteer to handle the Vue.js SPA
+            let browser = null
+            try {
+                // Launch browser with specific arguments for Netlify environment
+                browser = await puppeteer.launch({
+                    headless: true,
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--no-first-run',
+                        '--no-zygote',
+                        '--single-process',
+                        '--disable-gpu'
+                    ]
+                })
 
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
-                console.log(`[Milestone Scraping] 🔄 Attempt ${attempt + 1}/${maxRetries} - waiting ${delays[attempt]}ms`)
+                const page = await browser.newPage()
 
-                // Wait for the specified delay
-                await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+                // Set user agent
+                await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
 
-                // Fetch the page again to see if content has loaded
-                try {
-                    const retryResponse = await axios.get(url, {
-                        timeout: 10000,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                // Navigate to the page
+                console.log(`[Milestone Scraping] 🌐 Navigating to ${url}`)
+                await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 })
+
+                // Wait for the content to load - try multiple selectors
+                console.log(`[Milestone Scraping] ⏳ Waiting for content to load...`)
+
+                // Wait for either the poa-content div or the data-v attribute to appear
+                await page.waitForSelector('div.poa-content.html-text, div.html-text.poa-content, div[data-v-d48355d0]', {
+                    timeout: 10000
+                }).catch(() => {
+                    console.log(`[Milestone Scraping] ⚠️ Timeout waiting for content selectors`)
+                })
+
+                // Additional wait to ensure content is fully loaded
+                await new Promise(resolve => setTimeout(resolve, 2000))
+
+                // Extract the content using page.$eval for each selector
+                let content = null
+                const selectors = [
+                    'div.poa-content.html-text',
+                    'div.html-text.poa-content',
+                    'div.poa-content',
+                    'div.html-text',
+                    'div[data-v-d48355d0]'
+                ]
+
+                for (const selector of selectors) {
+                    try {
+                        content = await page.$eval(selector, (el: any) => el.textContent?.trim() || null)
+                        if (content) {
+                            console.log(`[Milestone Scraping] ✅ Found content with selector: ${selector}`)
+                            break
                         }
-                    })
-
-                    if (retryResponse.status === 200) {
-                        const retryHtml = retryResponse.data
-                        const $retry = cheerio.load(retryHtml)
-
-                        // Check if content has loaded
-                        const poaContentDiv = $retry('div.poa-content.html-text, div.html-text.poa-content')
-                        if (poaContentDiv.length > 0) {
-                            const content = poaContentDiv.text().trim()
-                            if (content) {
-                                console.log(`[Milestone Scraping] ✅ Content loaded after ${delays[attempt]}ms delay`)
-                                return content
-                                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-                                    .trim()
-                            }
-                        }
-
-                        // Also try the data-v attribute selector
-                        const vueDiv = $retry('div[data-v-d48355d0]')
-                        if (vueDiv.length > 0) {
-                            const content = vueDiv.text().trim()
-                            if (content) {
-                                console.log(`[Milestone Scraping] ✅ Vue.js content loaded after ${delays[attempt]}ms delay`)
-                                return content
-                                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-                                    .trim()
-                            }
-                        }
-
-                        console.log(`[Milestone Scraping] 🔄 Content not loaded yet, retrying...`)
+                    } catch (error) {
+                        // Selector not found, continue to next
+                        continue
                     }
-                } catch (retryError) {
-                    console.log(`[Milestone Scraping] ❌ Retry attempt ${attempt + 1} failed:`, retryError)
+                }
+
+                if (content) {
+                    console.log(`[Milestone Scraping] ✅ Successfully extracted content using Puppeteer (${content.length} characters)`)
+                    return content
+                        .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                        .trim()
+                } else {
+                    console.log(`[Milestone Scraping] ❌ No content found with Puppeteer`)
+                    return null
+                }
+
+            } catch (puppeteerError) {
+                console.error(`[Milestone Scraping] ❌ Puppeteer error:`, puppeteerError)
+                return null
+            } finally {
+                // Always close the browser
+                if (browser) {
+                    try {
+                        await browser.close()
+                        console.log(`[Milestone Scraping] 🔒 Browser closed`)
+                    } catch (closeError) {
+                        console.error(`[Milestone Scraping] ❌ Error closing browser:`, closeError)
+                    }
                 }
             }
-
-            console.log(`[Milestone Scraping] ❌ Content never loaded after ${maxRetries} attempts for milestone ${milestoneNumber} of project ${projectId}`)
-            return null
         }
 
         // If not SPA, try the original HTML parsing approach
