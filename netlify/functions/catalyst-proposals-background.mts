@@ -3,8 +3,6 @@ import type { Context } from '@netlify/functions'
 import { config as dotenv } from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 import axios from 'axios'
-import * as cheerio from 'cheerio'
-import puppeteer from 'puppeteer-core'
 
 dotenv()
 
@@ -36,297 +34,6 @@ if (!LIDO_CSRF_TOKEN) {
 }
 
 const API_BASE = 'https://www.lidonation.com/api/catalyst-explorer'
-
-/**
- * Scrapes milestone content from the milestones.projectcatalyst.io website.
- * Since this is a Vue.js SPA, we need to try multiple approaches.
- */
-async function scrapeMilestoneContent(projectId: string, milestoneNumber: number): Promise<string | null> {
-    const url = `https://milestones.projectcatalyst.io/projects/${projectId}/milestones/${milestoneNumber}`
-
-    try {
-        console.log(`[Milestone Scraping] Fetching milestone ${milestoneNumber} for project ${projectId}`)
-
-        const response = await axios.get(url, {
-            timeout: 10000, // 10 second timeout
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        })
-
-        if (response.status !== 200) {
-            console.log(`[Milestone Scraping] HTTP ${response.status} for milestone ${milestoneNumber} of project ${projectId}`)
-            return null
-        }
-
-        const html = response.data
-
-        // Load HTML into Cheerio
-        const $ = cheerio.load(html)
-
-        // Check if this is a Vue.js SPA (just has <div id="app"></div>)
-        const appDiv = $('#app')
-        if (appDiv.length > 0 && appDiv.html() === '') {
-            console.log(`[Milestone Scraping] 🔍 Detected Vue.js SPA - using Puppeteer to render content`)
-
-            // Try Puppeteer first, but fall back to alternative methods if it fails
-            console.log(`[Milestone Scraping] 🔍 Attempting Puppeteer for Vue.js SPA`)
-
-            let browser = null
-            try {
-                // Launch browser with specific arguments for Netlify environment
-                browser = await puppeteer.launch({
-                    headless: true,
-                    executablePath: process.env.CHROME_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-                    args: [
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-accelerated-2d-canvas',
-                        '--no-first-run',
-                        '--no-zygote',
-                        '--single-process',
-                        '--disable-gpu',
-                        '--disable-web-security',
-                        '--disable-features=VizDisplayCompositor'
-                    ]
-                })
-
-                const page = await browser.newPage()
-
-                // Set user agent
-                await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-
-                // Navigate to the page
-                console.log(`[Milestone Scraping] 🌐 Navigating to ${url}`)
-                await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 })
-
-                // Wait for the content to load - try multiple selectors
-                console.log(`[Milestone Scraping] ⏳ Waiting for content to load...`)
-
-                // Wait for either the poa-content div or the data-v attribute to appear
-                await page.waitForSelector('div.poa-content.html-text, div.html-text.poa-content, div[data-v-d48355d0]', {
-                    timeout: 10000
-                }).catch(() => {
-                    console.log(`[Milestone Scraping] ⚠️ Timeout waiting for content selectors`)
-                })
-
-                // Additional wait to ensure content is fully loaded
-                await new Promise(resolve => setTimeout(resolve, 2000))
-
-                // Extract the content using page.$eval for each selector
-                let content = null
-                const selectors = [
-                    'div.poa-content.html-text',
-                    'div.html-text.poa-content',
-                    'div.poa-content',
-                    'div.html-text',
-                    'div[data-v-d48355d0]'
-                ]
-
-                for (const selector of selectors) {
-                    try {
-                        content = await page.$eval(selector, (el: any) => el.textContent?.trim() || null)
-                        if (content) {
-                            console.log(`[Milestone Scraping] ✅ Found content with selector: ${selector}`)
-                            break
-                        }
-                    } catch (error) {
-                        // Selector not found, continue to next
-                        continue
-                    }
-                }
-
-                if (content) {
-                    console.log(`[Milestone Scraping] ✅ Successfully extracted content using Puppeteer (${content.length} characters)`)
-                    return content
-                        .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-                        .trim()
-                } else {
-                    console.log(`[Milestone Scraping] ❌ No content found with Puppeteer`)
-                    return null
-                }
-
-            } catch (puppeteerError) {
-                console.error(`[Milestone Scraping] ❌ Puppeteer error:`, puppeteerError)
-                console.log(`[Milestone Scraping] 🔄 Falling back to alternative method`)
-
-                // Fallback: Try with different headers and longer timeout
-                try {
-                    console.log(`[Milestone Scraping] 🔄 Trying alternative HTTP request method`)
-
-                    const fallbackResponse = await axios.get(url, {
-                        timeout: 30000, // 30 second timeout
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                            'Accept-Language': 'en-US,en;q=0.5',
-                            'Accept-Encoding': 'gzip, deflate, br',
-                            'Connection': 'keep-alive',
-                            'Upgrade-Insecure-Requests': '1',
-                            'Sec-Fetch-Dest': 'document',
-                            'Sec-Fetch-Mode': 'navigate',
-                            'Sec-Fetch-Site': 'none',
-                            'Cache-Control': 'max-age=0'
-                        }
-                    })
-
-                    if (fallbackResponse.status === 200) {
-                        const fallbackHtml = fallbackResponse.data
-                        const $fallback = cheerio.load(fallbackHtml)
-
-                        // Check if content is now available
-                        const poaContentDiv = $fallback('div.poa-content.html-text, div.html-text.poa-content')
-                        if (poaContentDiv.length > 0) {
-                            const content = poaContentDiv.text().trim()
-                            if (content) {
-                                console.log(`[Milestone Scraping] ✅ Found content with fallback method`)
-                                return content
-                                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-                                    .trim()
-                            }
-                        }
-
-                        // Also try the data-v attribute selector
-                        const vueDiv = $fallback('div[data-v-d48355d0]')
-                        if (vueDiv.length > 0) {
-                            const content = vueDiv.text().trim()
-                            if (content) {
-                                console.log(`[Milestone Scraping] ✅ Found Vue.js content with fallback method`)
-                                return content
-                                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-                                    .trim()
-                            }
-                        }
-                    }
-
-                    console.log(`[Milestone Scraping] ❌ Fallback method also failed`)
-                    return null
-
-                } catch (fallbackError) {
-                    console.error(`[Milestone Scraping] ❌ Fallback method error:`, fallbackError)
-                    return null
-                }
-            } finally {
-                // Always close the browser
-                if (browser) {
-                    try {
-                        await browser.close()
-                        console.log(`[Milestone Scraping] 🔒 Browser closed`)
-                    } catch (closeError) {
-                        console.error(`[Milestone Scraping] ❌ Error closing browser:`, closeError)
-                    }
-                }
-            }
-        }
-
-        // If not SPA, try the original HTML parsing approach
-        let content = ''
-
-        // First, try to find div with both poa-content and html-text classes (in any order)
-        const poaContentDiv = $('div.poa-content.html-text, div.html-text.poa-content')
-        if (poaContentDiv.length > 0) {
-            content = poaContentDiv.text().trim()
-            console.log(`[Milestone Scraping] ✅ Found content using div.poa-content.html-text selector`)
-        } else {
-            // Try just poa-content class
-            const poaDiv = $('div.poa-content')
-            if (poaDiv.length > 0) {
-                content = poaDiv.text().trim()
-                console.log(`[Milestone Scraping] ✅ Found content using div.poa-content selector`)
-            } else {
-                // Try html-text class
-                const htmlDiv = $('div.html-text')
-                if (htmlDiv.length > 0) {
-                    content = htmlDiv.text().trim()
-                    console.log(`[Milestone Scraping] ✅ Found content using div.html-text selector`)
-                } else {
-                    // Last resort: look for any div with data-v attribute (Vue.js components)
-                    const vueDiv = $('div[data-v-d48355d0]')
-                    if (vueDiv.length > 0) {
-                        content = vueDiv.text().trim()
-                        console.log(`[Milestone Scraping] ✅ Found content using Vue.js data-v selector`)
-                    } else {
-                        // Debug: log all div classes to help understand the structure
-                        const allDivs = $('div')
-                        const classes = new Set<string>()
-                        allDivs.each((_, el) => {
-                            const className = $(el).attr('class')
-                            if (className) {
-                                className.split(' ').forEach(cls => classes.add(cls))
-                            }
-                        })
-                        console.log(`[Milestone Scraping] 🔍 Available div classes:`, Array.from(classes))
-
-                        console.log(`[Milestone Scraping] ❌ No content found for milestone ${milestoneNumber} of project ${projectId}`)
-                        return null
-                    }
-                }
-            }
-        }
-
-        // Clean up the content
-        if (content) {
-            content = content
-                .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-                .trim()
-
-            console.log(`[Milestone Scraping] ✅ Successfully scraped milestone ${milestoneNumber} for project ${projectId} (${content.length} characters)`)
-            return content
-        } else {
-            console.log(`[Milestone Scraping] ❌ Empty content found for milestone ${milestoneNumber} of project ${projectId}`)
-            return null
-        }
-    } catch (error) {
-        console.error(`[Milestone Scraping] ❌ Error scraping milestone ${milestoneNumber} for project ${projectId}:`, error)
-        if (axios.isAxiosError(error)) {
-            if (error.response?.status === 404) {
-                console.log(`[Milestone Scraping] 404 - Milestone ${milestoneNumber} not found for project ${projectId}`)
-            } else {
-                console.log(`[Milestone Scraping] HTTP ${error.response?.status} for milestone ${milestoneNumber} of project ${projectId}`)
-            }
-        }
-        return null
-    }
-}
-
-/**
- * Scrapes all milestones for a project and returns them as a JSON object.
- */
-async function scrapeAllMilestones(projectId: string, milestonesQty: number): Promise<Record<string, string> | null> {
-    if (!milestonesQty || milestonesQty <= 0) {
-        console.log(`[Milestone Scraping] ⏭️ No milestones to scrape for project ${projectId} (milestones_qty: ${milestonesQty})`)
-        return null
-    }
-
-    console.log(`[Milestone Scraping] 🚀 Starting to scrape ${milestonesQty} milestones for project ${projectId}`)
-
-    const milestonesContent: Record<string, string> = {}
-    let successfulScrapes = 0
-
-    // Scrape each milestone
-    for (let milestoneNumber = 1; milestoneNumber <= milestonesQty; milestoneNumber++) {
-        const content = await scrapeMilestoneContent(projectId, milestoneNumber)
-
-        if (content) {
-            milestonesContent[milestoneNumber.toString()] = content
-            successfulScrapes++
-        } else {
-            // Still add an entry but with null/empty to maintain milestone numbering
-            milestonesContent[milestoneNumber.toString()] = ''
-        }
-
-        // Add a small delay between requests to be respectful to the server
-        if (milestoneNumber < milestonesQty) {
-            await new Promise(resolve => setTimeout(resolve, 500)) // 500ms delay
-        }
-    }
-
-    console.log(`[Milestone Scraping] 📊 Completed scraping for project ${projectId}: ${successfulScrapes}/${milestonesQty} milestones successful`)
-
-    // Only return the object if we have at least some content
-    return successfulScrapes > 0 ? milestonesContent : null
-}
 
 /**
  * Fetches voting metrics for a single proposal by title & fund number.
@@ -805,9 +512,6 @@ export default async (req: Request, context: Context) => {
                 (m: any) => m.som_signoff_count > 0 && m.poa_signoff_count > 0
             ).length
 
-            // Scrape milestone content
-            const milestonesContent = await scrapeAllMilestones(projectId, projectDetails.milestones_qty)
-
             // Prepare data for Supabase (but don't push yet)
             const supabaseData = {
                 id: projectDetails.id,
@@ -826,7 +530,6 @@ export default async (req: Request, context: Context) => {
                 finished: '',
                 voting: voting,
                 milestones_completed: milestonesCompleted,
-                milestones_content: milestonesContent,
                 updated_at: new Date().toISOString()
             }
 
@@ -900,9 +603,6 @@ export default async (req: Request, context: Context) => {
                         (m: any) => m.som_signoff_count > 0 && m.poa_signoff_count > 0
                     ).length
 
-                    // Scrape milestone content
-                    const milestonesContent = await scrapeAllMilestones(failedTitle.projectId, projectDetails.milestones_qty)
-
                     // Prepare updated data for Supabase (but don't push yet)
                     const updatedSupabaseData = {
                         id: projectDetails.id,
@@ -921,7 +621,6 @@ export default async (req: Request, context: Context) => {
                         finished: '',
                         voting: voting,
                         milestones_completed: milestonesCompleted,
-                        milestones_content: milestonesContent,
                         updated_at: new Date().toISOString()
                     }
 
