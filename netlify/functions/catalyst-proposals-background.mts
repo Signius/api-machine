@@ -446,10 +446,14 @@ async function extractMilestonesContent(proposalId: string): Promise<Record<stri
             .order('milestone', { ascending: true })
             .order('current', { ascending: false })
             .order('created_at', { ascending: false })
-            .order('poas.created_at', { ascending: false })
 
         if (error) {
             console.error(`[POAs] Error fetching SOMs data for proposal ${proposalId}:`, error)
+            console.error(`[POAs] Error details:`, {
+                code: error.code,
+                message: error.message,
+                details: error.details
+            })
             return {}
         }
 
@@ -459,6 +463,12 @@ async function extractMilestonesContent(proposalId: string): Promise<Record<stri
         }
 
         console.log(`[POAs] Found ${somData.length} SOM records for proposal ${proposalId}`)
+        console.log(`[POAs] Sample SOM data:`, somData.slice(0, 2).map(som => ({
+            id: som.id,
+            milestone: som.milestone,
+            current: som.current,
+            poas_count: som.poas?.length || 0
+        })))
 
         // Group by milestone and get the current (most recent) SOM for each
         const milestoneMap = new Map<number, any>()
