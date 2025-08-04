@@ -446,7 +446,8 @@ async function extractMilestonesContent(proposalId: string): Promise<Record<stri
                 poas(
                     id,
                     content,
-                    created_at
+                    created_at,
+                    current
                 )
             `)
             .eq('proposal_id', proposalId)
