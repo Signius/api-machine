@@ -493,6 +493,14 @@ async function extractMilestonesContent(proposalId: string): Promise<Record<stri
 
             // Extract POAs content
             if (currentSom.poas && currentSom.poas.length > 0) {
+                // Debug: Log the POAs data to see what we're working with
+                console.log(`[POAs] Raw POAs data for milestone ${milestone}:`, currentSom.poas.map((poa: any) => ({
+                    id: poa.id,
+                    current: poa.current,
+                    has_content: !!poa.content,
+                    content_length: poa.content?.length || 0
+                })))
+
                 // Filter for current POAs only
                 const currentPoas = currentSom.poas.filter((poa: any) => poa.current === true)
                 console.log(`[POAs] Found ${currentSom.poas.length} total POAs, ${currentPoas.length} current POAs for milestone ${milestone}`)
