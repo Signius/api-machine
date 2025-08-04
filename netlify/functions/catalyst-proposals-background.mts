@@ -486,15 +486,18 @@ async function extractMilestonesContent(proposalId: string): Promise<Record<stri
 
             // Extract POAs content
             if (currentSom.poas && currentSom.poas.length > 0) {
-                console.log(`[POAs] Found ${currentSom.poas.length} POAs for milestone ${milestone}`)
+                // Filter for current POAs only
+                const currentPoas = currentSom.poas.filter((poa: any) => poa.current === true)
+                console.log(`[POAs] Found ${currentSom.poas.length} total POAs, ${currentPoas.length} current POAs for milestone ${milestone}`)
+
                 const milestoneContent: string[] = []
 
-                for (const poa of currentSom.poas) {
+                for (const poa of currentPoas) {
                     if (poa.content) {
                         const cleanedContent = cleanHtmlContent(poa.content)
                         if (cleanedContent) {
                             milestoneContent.push(cleanedContent)
-                            console.log(`[POAs] Added ${cleanedContent.length} characters of cleaned content from POA ${poa.id}`)
+                            console.log(`[POAs] Added ${cleanedContent.length} characters of cleaned content from current POA ${poa.id}`)
                         }
                     }
                 }
@@ -503,6 +506,8 @@ async function extractMilestonesContent(proposalId: string): Promise<Record<stri
                     const milestoneKey = `milestone_${milestone}`
                     milestonesContent[milestoneKey] = milestoneContent.join('\n\n')
                     console.log(`[POAs] Added milestone ${milestone} content (${milestoneContent.length} parts)`)
+                } else {
+                    console.log(`[POAs] No current POAs with content found for milestone ${milestone}`)
                 }
             } else {
                 console.log(`[POAs] No POAs found for milestone ${milestone}`)
