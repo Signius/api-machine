@@ -387,7 +387,9 @@ async function fetchSnapshotData(projectId: string) {
 function cleanHtmlContent(htmlContent: string): string {
     if (!htmlContent) return ''
 
-    return htmlContent
+    console.log(`[HTML Clean] Original content length: ${htmlContent.length}`)
+
+    const cleaned = htmlContent
         // Replace <br> and <br/> with newlines
         .replace(/<br\s*\/?>/gi, '\n')
         // Replace </p> with double newlines to separate paragraphs
@@ -420,6 +422,11 @@ function cleanHtmlContent(htmlContent: string): string {
         .replace(/\n{3,}/g, '\n\n')
         // Trim whitespace
         .trim()
+
+    console.log(`[HTML Clean] Cleaned content length: ${cleaned.length}`)
+    console.log(`[HTML Clean] Cleaned content preview: ${cleaned.substring(0, 100)}...`)
+
+    return cleaned
 }
 
 /**
@@ -493,12 +500,18 @@ async function extractMilestonesContent(proposalId: string): Promise<Record<stri
                 const milestoneContent: string[] = []
 
                 for (const poa of currentPoas) {
+                    console.log(`[POAs] Processing POA ${poa.id}, has content: ${!!poa.content}, content length: ${poa.content?.length || 0}`)
                     if (poa.content) {
                         const cleanedContent = cleanHtmlContent(poa.content)
+                        console.log(`[POAs] Cleaned content length: ${cleanedContent.length}`)
                         if (cleanedContent) {
                             milestoneContent.push(cleanedContent)
                             console.log(`[POAs] Added ${cleanedContent.length} characters of cleaned content from current POA ${poa.id}`)
+                        } else {
+                            console.log(`[POAs] Cleaned content was empty for POA ${poa.id}`)
                         }
+                    } else {
+                        console.log(`[POAs] No content found for POA ${poa.id}`)
                     }
                 }
 
