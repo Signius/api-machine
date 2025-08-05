@@ -448,7 +448,7 @@ function cleanHtmlContent(htmlContent: string): string {
 /**
  * Extracts and combines POAs content for all milestones with structured format.
  */
-async function extractMilestonesContent(proposalId: string): Promise<MilestonesContentRecord> {
+async function extractMilestonesContent(proposalId: string, projectId: string): Promise<MilestonesContentRecord> {
     console.log(`[POAs] Extracting milestones content for proposal ${proposalId}`)
 
     try {
@@ -571,7 +571,7 @@ async function extractMilestonesContent(proposalId: string): Promise<MilestonesC
                         isCloseOut: isCloseOut,
                         link: '', // This will be filled in later from proposal details
                         number: milestone,
-                        projectId: proposalId
+                        projectId: projectId
                     } as MilestoneContent
 
                     console.log(`[POAs] Added milestone ${milestone} content (${milestoneContent.length} parts) with structured format`)
@@ -757,7 +757,7 @@ export default async (req: Request, context: Context) => {
             ).length
 
             // Extract and combine POAs content
-            const milestonesContent = await extractMilestonesContent(projectDetails.id)
+            const milestonesContent = await extractMilestonesContent(projectDetails.id, projectDetails.project_id)
             if (milestonesContent && Object.keys(milestonesContent).length > 0) {
                 // Fill in challenge and link information for each milestone
                 const challengeTitle = (projectDetails.challenges as any)?.title || ''
@@ -865,7 +865,7 @@ export default async (req: Request, context: Context) => {
                     ).length
 
                     // Extract and combine POAs content
-                    const milestonesContent = await extractMilestonesContent(projectDetails.id)
+                    const milestonesContent = await extractMilestonesContent(projectDetails.id, projectDetails.project_id)
                     if (milestonesContent && Object.keys(milestonesContent).length > 0) {
                         // Fill in challenge and link information for each milestone
                         const challengeTitle = (projectDetails.challenges as any)?.title || ''
