@@ -571,7 +571,7 @@ async function extractMilestonesContent(proposalId: string, projectId: string): 
                         isCloseOut: isCloseOut,
                         link: '', // This will be filled in later from proposal details
                         number: milestone,
-                        projectId: projectId
+                        projectId: String(projectId)
                     } as MilestoneContent
 
                     console.log(`[POAs] Added milestone ${milestone} content (${milestoneContent.length} parts) with structured format`)
