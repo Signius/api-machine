@@ -8,6 +8,9 @@ runtime = "nodejs18.x"
 [functions."catalyst-proposals-background"]
 runtime = "nodejs18.x"
 
+[functions."github-stats-background"]
+runtime = "nodejs18.x"
+
 [dev]
 functions = "netlify/functions"
 edge_functions = false
